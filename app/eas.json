@@ -16,15 +16,15 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "https://REPLACE-WITH-YOUR-API-HOSTNAME",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "REPLACE-WITH-ANON-KEY-FROM-SERVER-ENV"
+        "EXPO_PUBLIC_SUPABASE_URL": "https://timeapi.zovxonline.com",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg0MDU5MTQ1LCJleHAiOjIwOTk0MTkxNDV9.c959AkQ0vbNMxBOwqOcSIEmF3uNPuoh5eD76iJE5Tn4"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "https://REPLACE-WITH-YOUR-API-HOSTNAME",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "REPLACE-WITH-ANON-KEY-FROM-SERVER-ENV"
+        "EXPO_PUBLIC_SUPABASE_URL": "https://timeapi.zovxonline.com",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg0MDU5MTQ1LCJleHAiOjIwOTk0MTkxNDV9.c959AkQ0vbNMxBOwqOcSIEmF3uNPuoh5eD76iJE5Tn4"
       }
     }
   },
