@@ -1,0 +1,13 @@
+{
+  "name": "db-tests",
+  "private": true,
+  "type": "module",
+  "description": "Runs the SQL migrations against a real (embedded) Postgres and asserts tenant isolation, the shift state machine, idempotency, and retention.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 db.test.mjs"
+  },
+  "dependencies": {
+    "embedded-postgres": "17.10.0-beta.17",
+    "pg": "^8.13.1"
+  }
+}

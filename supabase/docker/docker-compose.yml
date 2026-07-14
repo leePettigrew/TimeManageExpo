@@ -1,0 +1,356 @@
+# TimeTable — self-hosted Supabase stack for Unraid.
+#
+# Trimmed from the official supabase/supabase docker/docker-compose.yml
+# (master as of 2026-07; image tags pinned from that file).
+#
+# Kept:    db, auth (GoTrue), rest (PostgREST), realtime, kong (gateway),
+#          studio + meta (admin UI).
+# Dropped: storage + imgproxy (app stores no files), edge functions (unused),
+#          supavisor pooler (single-box deployment; services connect to db
+#          directly), analytics/logflare + vector (no longer part of the
+#          official base compose; Studio runs with logs disabled).
+#
+#   Start:  docker compose up -d
+#   Stop:   docker compose down
+#   Reset:  docker compose down && rm -rf ${DATA_DIR}/db/data   (DESTROYS DATA)
+#
+# App schema migrations (../migrations/*.sql) are NOT applied on first boot.
+# The db image's initdb runs before GoTrue has ever started, so auth.users
+# does not yet have the final shape GoTrue's own migrations give it (e.g. the
+# phone column used by claim_invite()), and pg_cron is not yet enabled.
+# Apply them AFTER the stack is healthy:  sh apply-migrations.sh
+# (See README-unraid.md.)
+
+name: supabase-timetable
+
+services:
+
+  studio:
+    container_name: supabase-studio
+    image: supabase/studio:2026.07.07-sha-a6a04f2
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://localhost:3000/api/platform/profile').then((r) => {if (r.status !== 200) throw new Error(r.status)})\""
+        ]
+      timeout: 10s
+      interval: 5s
+      retries: 3
+      start_period: 20s
+    environment:
+      # Listen on all IPv4 interfaces
+      HOSTNAME: "0.0.0.0"
+
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: ${POSTGRES_HOST:-db}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # See: https://supabase.com/docs/guides/self-hosting/remove-superuser-access
+      POSTGRES_USER_READ_WRITE: postgres
+
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public,graphql_public}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public}
+
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION:-TimeTable}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT:-TimeTable}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+
+      # Analytics/logflare is not deployed in this trimmed stack; the official
+      # base compose ships with logs disabled too (docker-compose.logs.yml is
+      # an optional overlay upstream).
+      ENABLED_FEATURES_LOGS_ALL: "false"
+
+      SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
+      EDGE_FUNCTIONS_MANAGEMENT_FOLDER: /app/edge-functions
+    volumes:
+      - ${DATA_DIR:-/mnt/user/appdata/timetable}/studio/snippets:/app/snippets
+      # Edge runtime is not deployed; Studio still wants the folder to exist.
+      - ${DATA_DIR:-/mnt/user/appdata/timetable}/studio/edge-functions:/app/edge-functions:ro
+
+  kong:
+    container_name: supabase-kong
+    image: kong/kong:3.9.1
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - api-gw
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      # NOTE: official behaviour — Kong will not start until Studio is
+      # healthy. If you ever remove Studio, delete this depends_on block and
+      # the dashboard/mcp routes in volumes/api/kong.yml.
+      studio:
+        condition: service_healthy
+    ports:
+      - ${KONG_HTTP_PORT:-8000}:8000/tcp
+      - ${KONG_HTTPS_PORT:-8443}:8443/tcp
+    volumes:
+      - ./volumes/api/kong.yml:/home/kong/temp.yml:ro
+      - ./volumes/api/kong-entrypoint.sh:/home/kong/kong-entrypoint.sh:ro
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
+      KONG_ROUTER_FLAVOR: expressions
+      # https://github.com/supabase/cli/issues/14
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_DNS_NOT_FOUND_TTL: 1
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth,request-termination,ip-restriction,post-function
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      KONG_PROXY_ACCESS_LOG: /dev/stdout combined
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      # Optional new-style opaque API keys (leave empty to use legacy JWT keys)
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      ANON_KEY_ASYMMETRIC: ${ANON_KEY_ASYMMETRIC:-}
+      SERVICE_ROLE_KEY_ASYMMETRIC: ${SERVICE_ROLE_KEY_ASYMMETRIC:-}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    entrypoint: ["/bin/sh", "/home/kong/kong-entrypoint.sh"]
+
+  auth:
+    container_name: supabase-auth
+    image: supabase/gotrue:v2.189.0
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9999/health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
+
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-}
+      # Must stay false: a worker's very first phone OTP sign-in IS a signup.
+      # Access is gated afterwards by the invites table + claim_invite() RPC.
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+
+      # Legacy symmetric HS256 key
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}
+
+      # Email auth is OFF for this deployment (phone OTP only). The SMTP /
+      # mailer variables from the official compose are intentionally omitted;
+      # copy them back from upstream if you ever enable email.
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP:-false}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS:-false}
+
+      ## Phone auth (the only sign-in method used by the apps)
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP:-true}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM:-true}
+      GOTRUE_SMS_OTP_EXP: ${SMS_OTP_EXP:-300}
+      GOTRUE_SMS_OTP_LENGTH: ${SMS_OTP_LENGTH:-6}
+      GOTRUE_SMS_MAX_FREQUENCY: ${SMS_MAX_FREQUENCY:-60s}
+
+      # DEVELOPMENT: fixed OTP codes so the stack works with NO SMS account.
+      # Format: "<phone>:<code>,<phone>:<code>" — phone WITHOUT the leading
+      # "+" (GoTrue strips "+" and spaces before the lookup). A matching phone
+      # never reaches the SMS provider at all. Empty = disabled.
+      GOTRUE_SMS_TEST_OTP: ${SMS_TEST_OTP:-}
+      # Optional expiry for the test OTPs (ISO 8601, e.g. 2027-01-01T00:00:00Z)
+      GOTRUE_SMS_TEST_OTP_VALID_UNTIL: ${SMS_TEST_OTP_VALID_UNTIL:-}
+
+      # PRODUCTION SMS — Twilio Verify. Set SMS_PROVIDER=twilio_verify and the
+      # SMS_TWILIO_VERIFY_* values in .env, then uncomment these three lines.
+      # (Var names verified against supabase/auth internal/conf configuration.)
+      GOTRUE_SMS_PROVIDER: ${SMS_PROVIDER:-}
+      # GOTRUE_SMS_TWILIO_VERIFY_ACCOUNT_SID: ${SMS_TWILIO_VERIFY_ACCOUNT_SID}
+      # GOTRUE_SMS_TWILIO_VERIFY_AUTH_TOKEN: ${SMS_TWILIO_VERIFY_AUTH_TOKEN}
+      # GOTRUE_SMS_TWILIO_VERIFY_MESSAGE_SERVICE_SID: ${SMS_TWILIO_VERIFY_MESSAGE_SERVICE_SID}
+
+      # Long-lived worker sessions: refresh tokens have no expiry in GoTrue;
+      # rotation + a small reuse window keeps them safe while letting devices
+      # stay signed in for months. NOTE: policy choice for this app; the vars
+      # are documented GoTrue config (GOTRUE_SECURITY_REFRESH_TOKEN_*).
+      GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED: "true"
+      GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL: "10"
+
+  rest:
+    container_name: supabase-rest
+    image: postgrest/postgrest:v14.12
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "postgrest", "--ready" ]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public,graphql_public}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public}
+      PGRST_DB_ANON_ROLE: anon
+
+      PGRST_ADMIN_SERVER_PORT: 3001
+      PGRST_ADMIN_SERVER_HOST: localhost
+
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY:-3600}
+    command:
+      [
+        "postgrest"
+      ]
+
+  realtime:
+    # This container name looks inconsistent but is correct because realtime
+    # constructs the tenant id by parsing the subdomain
+    container_name: realtime-dev.supabase-realtime
+    image: supabase/realtime:v2.102.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sSfL --head -o /dev/null -H \"Authorization: Bearer ${ANON_KEY}\" http://localhost:4000/api/tenants/realtime-dev/health"
+        ]
+      timeout: 5s
+      interval: 30s
+      retries: 3
+      start_period: 10s
+    environment:
+      PORT: 4000
+      DB_HOST: ${POSTGRES_HOST:-db}
+      DB_PORT: ${POSTGRES_PORT:-5432}
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:-supabaserealtime}
+
+      # Legacy symmetric HS256 key
+      API_JWT_SECRET: ${JWT_SECRET}
+
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+      DISABLE_HEALTHCHECK_LOGGING: "true"
+
+  meta:
+    container_name: supabase-meta
+    image: supabase/postgres-meta:v0.96.6
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: ${POSTGRES_HOST:-db}
+      PG_META_DB_PORT: ${POSTGRES_PORT:-5432}
+      PG_META_DB_NAME: ${POSTGRES_DB:-postgres}
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
+
+  db:
+    container_name: supabase-db
+    image: supabase/postgres:17.6.1.136
+    restart: unless-stopped
+    # Postgres stays LAN/stack-internal: nothing publishes 5432. Uncomment to
+    # reach it from the Unraid host / LAN (do NOT expose to the internet):
+    # ports:
+    #   - 5432:5432
+    volumes:
+      # First-boot init (only runs when db/data is empty). These are the
+      # official self-host bootstrap files; _supabase.sql / logs.sql /
+      # pooler.sql from upstream are omitted because analytics and supavisor
+      # are not deployed. Our app migrations are deliberately NOT mounted
+      # here — see apply-migrations.sh.
+      - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:ro
+      # Must be superuser to create event trigger
+      - ./volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:ro
+      # Must be superuser to alter reserved role
+      - ./volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+      # Initialize the database settings with JWT_SECRET and JWT_EXP
+      - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
+      # PGDATA — persisted on the Unraid array/cache
+      - ${DATA_DIR:-/mnt/user/appdata/timetable}/db/data:/var/lib/postgresql/data
+      # pgsodium/vault key material — must survive restarts (bind mount
+      # replaces the official db-config named volume)
+      - ${DATA_DIR:-/mnt/user/appdata/timetable}/db/config:/etc/postgresql-custom
+    healthcheck:
+      test:
+        [
+        "CMD",
+        "pg_isready",
+        "-U",
+        "postgres",
+        "-h",
+        "localhost"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY:-3600}
+    command:
+      [
+        "postgres",
+        "-c",
+        "config_file=/etc/postgresql/postgresql.conf",
+        "-c",
+        "log_min_messages=fatal" # prevents Realtime polling queries from appearing in logs
+      ]

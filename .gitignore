@@ -1,0 +1,29 @@
+# deps
+node_modules/
+.expo/
+dist/
+build/
+web-build/
+
+# env & secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+supabase/docker/.env
+
+# test artifacts
+supabase/tests/.pgdata/
+coverage/
+
+# native build output
+app/android/
+app/ios/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# OS / editor
+.DS_Store
+Thumbs.db

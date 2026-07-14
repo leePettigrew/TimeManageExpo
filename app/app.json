@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "TimeTable",
+    "slug": "timetable",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "ie.timetable.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["location"],
+        "NSLocationWhenInUseUsageDescription": "Your location is recorded only between clock-in and clock-out so your employer can verify hours on site.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Your location is recorded only between clock-in and clock-out so your employer can verify hours on site, even when the app is in the background. Tracking stops completely when you clock out."
+      }
+    },
+    "android": {
+      "package": "ie.timetable.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f172a",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Your location is recorded only between clock-in and clock-out so your employer can verify hours on site.",
+          "locationAlwaysAndWhenInUsePermission": "Your location is recorded only between clock-in and clock-out so your employer can verify hours on site, even when the app is in the background. Tracking stops completely when you clock out.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
+    ]
+  }
+}

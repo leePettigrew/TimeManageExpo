@@ -1,0 +1,214 @@
+// Sync engine: drains the outbox to the server in order — clock events first
+// (they anchor shifts), then ping batches per shift. Rows are marked synced
+// only on server ACK; the server dedupes on client UUIDs so retries and
+// double-sends are harmless. Permanent rejections (state-machine or timestamp
+// violations) stop retrying but keep the row as evidence.
+import NetInfo from '@react-native-community/netinfo';
+import { AppState } from 'react-native';
+import { supabase, rpcErrorCode, isNetworkError } from './supabase';
+import {
+  pendingClockEvents,
+  markClockEventSynced,
+  markClockEventFailed,
+  markClockEventDead,
+  clockEventIdsWithPendingPings,
+  pendingPings,
+  markPingsSynced,
+  serverShiftIdFor,
+  vacuumOutbox,
+  kvGet,
+  kvSet,
+} from './outbox';
+
+export interface SyncStatus {
+  running: boolean;
+  lastResult: 'idle' | 'ok' | 'offline' | 'error';
+  lastSyncAt: Date | null;
+  lastError: string | null;
+}
+
+type Listener = (s: SyncStatus) => void;
+
+const PERMANENT_ERRORS = new Set([
+  'shift_already_open',
+  'no_open_shift',
+  'device_timestamp_in_future',
+  'device_timestamp_too_old',
+  'no_active_profile',
+  'shift_not_found',
+]);
+
+const status: SyncStatus = { running: false, lastResult: 'idle', lastSyncAt: null, lastError: null };
+const listeners = new Set<Listener>();
+let backoffMs = 0;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let started = false;
+let rerunRequested = false;
+
+function notify() {
+  for (const l of listeners) l({ ...status });
+}
+
+export function onSyncStatus(listener: Listener): () => void {
+  listeners.add(listener);
+  listener({ ...status });
+  return () => listeners.delete(listener);
+}
+
+/** Wire up the triggers once per app run: connectivity regained, app foregrounded. */
+export function startSyncTriggers(): void {
+  if (started) return;
+  started = true;
+  NetInfo.addEventListener((state) => {
+    if (state.isConnected) {
+      backoffMs = 0;
+      void flush();
+    }
+  });
+  AppState.addEventListener('change', (next) => {
+    if (next === 'active') {
+      backoffMs = 0;
+      void flush();
+    }
+  });
+}
+
+function scheduleRetry() {
+  backoffMs = Math.min(backoffMs === 0 ? 5_000 : backoffMs * 2, 5 * 60_000);
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => void flush(), backoffMs);
+}
+
+/**
+ * Drain the outbox once. Safe to call from anywhere, any time; concurrent
+ * calls coalesce into the in-flight run.
+ */
+export async function flush(): Promise<SyncStatus> {
+  if (status.running) {
+    // don't drop work enqueued mid-run (e.g. a clock-out during a ping flush):
+    // remember it and go again as soon as the in-flight run finishes
+    rerunRequested = true;
+    return { ...status };
+  }
+  status.running = true;
+  notify();
+
+  try {
+    // 1) clock events, strictly in insertion order — a transient failure must
+    //    STOP the loop, or a later clock_out replays before its clock_in and
+    //    is permanently rejected server-side
+    const events = await pendingClockEvents();
+    for (const e of events) {
+      const args = {
+        p_client_event_id: e.id,
+        p_device_at: e.device_at,
+        p_lat: e.lat,
+        p_lng: e.lng,
+        p_accuracy_m: e.accuracy_m,
+        p_mocked: e.mocked === 1,
+      };
+      const { data, error } =
+        e.kind === 'in'
+          ? await supabase.rpc('clock_in', { ...args, p_device_info: JSON.parse(e.device_info || '{}') })
+          : await supabase.rpc('clock_out', args);
+
+      if (!error) {
+        const shift = Array.isArray(data) ? data[0] : data;
+        await markClockEventSynced(e.id, shift?.id ?? null);
+        continue;
+      }
+      if (isNetworkError(error)) {
+        await markClockEventFailed(e.id, error.message);
+        throw new OfflineError();
+      }
+      const code = rpcErrorCode(error);
+      if (PERMANENT_ERRORS.has(code)) {
+        // e.g. replayed clock-in raced an existing open shift: keep the row as
+        // evidence, stop retrying, let reconcile() fix the local view
+        await markClockEventDead(e.id, code);
+      } else {
+        // transient server error: stop here so later events keep their order
+        await markClockEventFailed(e.id, error.message);
+        throw error;
+      }
+    }
+
+    // acknowledgment recorded offline: deliver it now (GDPR Art 13 evidence)
+    const ackVersion = await kvGet('ack_version');
+    const ackSynced = await kvGet('ack_synced');
+    if (ackVersion && ackVersion !== ackSynced) {
+      const { error } = await supabase.rpc('record_acknowledgment', {
+        p_notice_version: ackVersion,
+      });
+      if (!error) await kvSet('ack_synced', ackVersion);
+      else if (isNetworkError(error)) throw new OfflineError();
+    }
+
+    // 2) ping batches, per shift, only once the shift's clock-in has a server id
+    const shiftsWithPings = await clockEventIdsWithPendingPings();
+    for (const clockEventId of shiftsWithPings) {
+      const serverShiftId = await serverShiftIdFor(clockEventId);
+      if (!serverShiftId) continue; // clock-in not acked yet; next flush picks it up
+
+      // loop batches until this shift's queue is empty
+      for (;;) {
+        const batch = await pendingPings(clockEventId, 100);
+        if (batch.length === 0) break;
+        const { error } = await supabase.rpc('sync_location_batch', {
+          p_shift_id: serverShiftId,
+          p_points: batch.map((p) => ({
+            id: p.id,
+            seq: p.seq,
+            device_at: p.device_at,
+            lat: p.lat,
+            lng: p.lng,
+            accuracy_m: p.accuracy_m,
+            speed_mps: p.speed_mps,
+            mocked: p.mocked === 1,
+            battery_pct: p.battery_pct,
+          })),
+        });
+        if (error) {
+          if (isNetworkError(error)) throw new OfflineError();
+          // permanent rejection of the whole batch is unexpected; mark synced
+          // to avoid a poison-pill loop — the server keeps its own counts
+          if (rpcErrorCode(error) === 'shift_not_found') {
+            await markPingsSynced(batch.map((p) => p.id));
+            continue;
+          }
+          throw error;
+        }
+        await markPingsSynced(batch.map((p) => p.id));
+      }
+    }
+
+    await vacuumOutbox();
+    status.lastResult = 'ok';
+    status.lastSyncAt = new Date();
+    status.lastError = null;
+    await kvSet('last_sync_at', status.lastSyncAt.toISOString());
+    backoffMs = 0;
+  } catch (e) {
+    if (e instanceof OfflineError) {
+      status.lastResult = 'offline';
+    } else {
+      status.lastResult = 'error';
+      status.lastError = e instanceof Error ? e.message : String(e);
+    }
+    scheduleRetry();
+  } finally {
+    status.running = false;
+    notify();
+    if (rerunRequested) {
+      rerunRequested = false;
+      setTimeout(() => void flush(), 250);
+    }
+  }
+  return { ...status };
+}
+
+class OfflineError extends Error {
+  constructor() {
+    super('offline');
+  }
+}
