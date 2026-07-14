@@ -1,0 +1,11 @@
+// Cloudflare Workers (static assets) config — used by the Git-connected
+// "npx wrangler deploy" build flow. Serves the Vite build output as a
+// static site with SPA fallback.
+{
+  "name": "timetable-dash",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
