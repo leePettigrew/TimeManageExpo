@@ -3,9 +3,9 @@
 // degraded-mode fallback and per-worker last-seen staleness badges — a manager
 // must never mistake stale for live.
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import type { LatestPing, Ping, ShiftEffective } from '../lib/types';
+import type { LatestPing, LocationRequest, Ping, ShiftEffective } from '../lib/types';
 import { fmtAgo, fmtTime, agoMinutes } from '../lib/format';
 import { WorkerMap } from './WorkerMap';
 import { FLAG_LABELS } from '../lib/types';
@@ -41,6 +41,27 @@ export function LiveBoard() {
     refetchInterval: 30_000,
   });
 
+  const pendingRequests = useQuery({
+    queryKey: ['pending-location-requests'],
+    queryFn: async (): Promise<LocationRequest[]> => {
+      const { data, error } = await supabase
+        .from('location_requests')
+        .select('*')
+        .is('fulfilled_at', null);
+      if (error) throw error;
+      return data as LocationRequest[];
+    },
+    refetchInterval: 10_000,
+  });
+
+  const locateNow = useMutation({
+    mutationFn: async (workerId: string) => {
+      const { error } = await supabase.rpc('request_location', { p_worker_id: workerId });
+      if (error) throw error;
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['pending-location-requests'] }),
+  });
+
   const trail = useQuery({
     queryKey: ['trail', selectedShift],
     enabled: !!selectedShift,
@@ -66,6 +87,10 @@ export function LiveBoard() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'worker_latest_ping' }, () => {
         void qc.invalidateQueries({ queryKey: ['latest-pings'] });
+        void qc.invalidateQueries({ queryKey: ['pending-location-requests'] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'location_requests' }, () => {
+        void qc.invalidateQueries({ queryKey: ['pending-location-requests'] });
       })
       .subscribe();
     return () => {
@@ -86,6 +111,10 @@ export function LiveBoard() {
   }, [shifts, pings]);
 
   const pingByWorker = useMemo(() => new Map(pings.map((p) => [p.worker_id, p])), [pings]);
+  const pendingByWorker = useMemo(
+    () => new Set((pendingRequests.data ?? []).map((r) => r.worker_id)),
+    [pendingRequests.data],
+  );
 
   return (
     <div className="live-layout">
@@ -122,6 +151,21 @@ export function LiveBoard() {
                 ) : (
                   <span className="badge warn">no location yet</span>
                 )}
+                {pendingByWorker.has(s.worker_id) ? (
+                  <span className="badge info">📍 locating…</span>
+                ) : (
+                  <span
+                    role="button"
+                    className="locate-link"
+                    title="Ask this phone for a fresh location (logged; the worker can see it)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      locateNow.mutate(s.worker_id);
+                    }}
+                  >
+                    📍 locate now
+                  </span>
+                )}
                 {s.anomaly_flags.map((f) => (
                   <span key={f} className="badge flag" title={FLAG_LABELS[f] ?? f}>
                     {FLAG_LABELS[f] ?? f}
@@ -131,6 +175,9 @@ export function LiveBoard() {
             </button>
           );
         })}
+        {locateNow.error ? (
+          <p className="error small">{String(locateNow.error.message)}</p>
+        ) : null}
         {selectedShift && (
           <p className="dim small">Showing today&apos;s route for the selected worker. Click again to hide.</p>
         )}

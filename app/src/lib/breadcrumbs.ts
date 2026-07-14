@@ -9,7 +9,7 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { uuidv7 } from './ids';
-import { insertPings, kvGet, nextPingSeq, NewPing } from './outbox';
+import { insertPings, kvGet, kvSet, nextPingSeq, NewPing } from './outbox';
 import { batteryPct } from './location';
 import { flush } from './sync';
 
@@ -58,11 +58,23 @@ TaskManager.defineTask(BREADCRUMB_TASK, async ({ data, error }) => {
   }));
   await insertPings(points);
 
+  // manager may have changed the ping cadence since the task started
+  await applyIntervalSetting();
+
   // opportunistic near-real-time sync; harmless offline (flush backs off)
   void flush();
 });
 
 export type BreadcrumbState = 'on' | 'off' | 'denied';
+
+const DEFAULT_INTERVAL_S = 90;
+
+/** Manager-set ping interval (seconds), cached from the server by the sync engine. */
+async function desiredIntervalS(): Promise<number> {
+  const raw = await kvGet('ping_interval_s');
+  const n = raw ? parseInt(raw, 10) : DEFAULT_INTERVAL_S;
+  return Number.isFinite(n) ? Math.min(Math.max(n, 60), 900) : DEFAULT_INTERVAL_S;
+}
 
 /**
  * Start tracking for the current shift. Requires the disclosure screen to have
@@ -79,12 +91,18 @@ export async function startBreadcrumbs(): Promise<BreadcrumbState> {
   if (await Location.hasStartedLocationUpdatesAsync(BREADCRUMB_TASK).catch(() => false)) {
     return 'on';
   }
+  return startTaskWithInterval(await desiredIntervalS());
+}
 
+async function startTaskWithInterval(intervalS: number): Promise<BreadcrumbState> {
+  // batch delivery: fast settings deliver faster (fresher map), slow settings
+  // batch harder (battery); clamped 2–5 minutes
+  const deferredMs = Math.min(Math.max(intervalS * 2, 120), 300) * 1000;
   await Location.startLocationUpdatesAsync(BREADCRUMB_TASK, {
     accuracy: Location.Accuracy.Balanced,
-    timeInterval: 90_000,          // Android: ping every ~90s while moving
-    distanceInterval: 30,          // suppress redundant points inside a house
-    deferredUpdatesInterval: 300_000, // batch delivery ~5 min — big battery win
+    timeInterval: intervalS * 1000, // Android: ping cadence while moving
+    distanceInterval: 30,           // suppress redundant points inside a house
+    deferredUpdatesInterval: deferredMs,
     pausesUpdatesAutomatically: false, // iOS may otherwise pause and never resume
     activityType: Location.ActivityType.Other,
     showsBackgroundLocationIndicator: true,
@@ -95,7 +113,26 @@ export async function startBreadcrumbs(): Promise<BreadcrumbState> {
       killServiceOnDestroy: false, // survive app swipe-away; clock-out still kills it
     },
   });
+  await kvSet('applied_interval_s', String(intervalS));
   return 'on';
+}
+
+/**
+ * Apply a changed manager setting mid-shift: restart the task with the new
+ * cadence. No-op when tracking isn't running or the setting is unchanged.
+ */
+export async function applyIntervalSetting(): Promise<void> {
+  try {
+    if (!(await breadcrumbsRunning())) return;
+    const desired = await desiredIntervalS();
+    const appliedRaw = await kvGet('applied_interval_s');
+    const applied = appliedRaw ? parseInt(appliedRaw, 10) : DEFAULT_INTERVAL_S;
+    if (desired === applied) return;
+    await Location.stopLocationUpdatesAsync(BREADCRUMB_TASK);
+    await startTaskWithInterval(desired);
+  } catch {
+    // best effort — the next tick retries
+  }
 }
 
 /** Hard stop. Called at clock-out, sign-out, and on zombie detection. */

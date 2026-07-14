@@ -50,7 +50,8 @@ test('cross-tenant reads return zero rows on every tenant table', async () => {
   });
 
   const tenantTables = ['profiles', 'shifts', 'invites',
-    'acknowledgments', 'adjustments', 'audit_log', 'worker_latest_ping', 'location_pings'];
+    'acknowledgments', 'adjustments', 'audit_log', 'worker_latest_ping', 'location_pings',
+    'location_requests'];
   for (const t of tenantTables) {
     const { rows } = await asUser(IDS.managerA, (c) =>
       c.query(`select * from ${t} where company_id = $1`, [IDS.companyB]));
@@ -414,6 +415,87 @@ test('simulated day: clock in, drive between 3 houses, clock out — timesheet a
   assert.equal(trail.length, points.length);
   const { rows: flags } = await pool.query(`select anomaly_flags from shifts where id = $1`, [shift.id]);
   assert.ok(!flags[0].anomaly_flags.includes('impossible_speed'), 'honest day must not be flagged');
+});
+
+// ── location controls (0007) ─────────────────────────────────────────────────
+
+test('request_location: manager-only, mid-shift only, fulfilled by fresh pings', async () => {
+  // workers cannot request anyone's location
+  await expectError(
+    asUser(IDS.workerA, (c) => c.query(`select request_location($1)`, [IDS.workerA])),
+    'manager_only');
+
+  // no open shift -> hard refusal (the GDPR line)
+  await expectError(
+    asUser(IDS.managerA, (c) => c.query(`select request_location($1)`, [IDS.workerA])),
+    'worker_not_clocked_in');
+
+  // cross-tenant target is invisible
+  await expectError(
+    asUser(IDS.managerB, (c) => c.query(`select request_location($1)`, [IDS.workerA])),
+    'worker_not_found');
+
+  const shift = await asUser(IDS.workerA, async (c) => {
+    const { rows } = await c.query(
+      `select * from clock_in($1, now(), 53.34, -6.27, 9, false, '{}')`, [randomUUID()]);
+    return rows[0];
+  });
+
+  const req = await asUser(IDS.managerA, async (c) => {
+    const { rows } = await c.query(`select * from request_location($1)`, [IDS.workerA]);
+    return rows[0];
+  });
+  assert.equal(req.fulfilled_at, null);
+
+  // a second request while one is pending dedupes onto the same row
+  const req2 = await asUser(IDS.managerA, async (c) => {
+    const { rows } = await c.query(`select * from request_location($1)`, [IDS.workerA]);
+    return rows[0];
+  });
+  assert.equal(req2.id, req.id);
+
+  // the worker can see the request (transparency)
+  const { rows: mine } = await asUser(IDS.workerA, (c) =>
+    c.query(`select id from location_requests where fulfilled_at is null`));
+  assert.equal(mine.length, 1);
+
+  // a fresh synced point fulfils it
+  await asUser(IDS.workerA, (c) =>
+    c.query(`select sync_location_batch($1, $2)`, [shift.id, JSON.stringify([{
+      id: randomUUID(), seq: 1, device_at: new Date().toISOString(), lat: 53.34, lng: -6.27, accuracy_m: 12,
+    }])]));
+  const { rows: done } = await pool.query(
+    `select fulfilled_at from location_requests where id = $1`, [req.id]);
+  assert.ok(done[0].fulfilled_at, 'request should be fulfilled by the fresh ping');
+
+  await asUser(IDS.workerA, (c) => c.query(`select clock_out($1, now())`, [randomUUID()]));
+});
+
+test('ping_interval_s: manager-tunable within bounds, same company only', async () => {
+  const res = await asUser(IDS.managerA, (c) =>
+    c.query(`update profiles set ping_interval_s = 300 where id = $1`, [IDS.workerA]));
+  assert.equal(res.rowCount, 1);
+
+  // bounds enforced by the check constraint
+  await expectError(
+    asUser(IDS.managerA, (c) =>
+      c.query(`update profiles set ping_interval_s = 5 where id = $1`, [IDS.workerA])),
+    'check constraint');
+
+  // cross-tenant tuning silently matches zero rows
+  const cross = await asUser(IDS.managerA, (c) =>
+    c.query(`update profiles set ping_interval_s = 600 where id = $1`, [IDS.workerB]));
+  assert.equal(cross.rowCount, 0);
+
+  // workers cannot tune themselves (manager-only update policy)
+  const self = await asUser(IDS.workerA, (c) =>
+    c.query(`update profiles set ping_interval_s = 60 where id = $1`, [IDS.workerA]));
+  assert.equal(self.rowCount, 0);
+
+  // the worker can read their own setting (the app applies it)
+  const { rows } = await asUser(IDS.workerA, (c) =>
+    c.query(`select ping_interval_s from profiles where id = $1`, [IDS.workerA]));
+  assert.equal(rows[0].ping_interval_s, 300);
 });
 
 // ── maintenance jobs ─────────────────────────────────────────────────────────

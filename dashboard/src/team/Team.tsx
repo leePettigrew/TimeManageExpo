@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import type { Profile } from '../lib/types';
+import { PING_INTERVALS } from '../lib/types';
 
 interface Invite {
   id: string;
@@ -96,6 +97,17 @@ export function Team({ profile }: { profile: Profile }) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['invites'] }),
   });
 
+  const setInterval_ = useMutation({
+    mutationFn: async (vars: { id: string; seconds: number }) => {
+      const { error: err } = await supabase
+        .from('profiles')
+        .update({ ping_interval_s: vars.seconds })
+        .eq('id', vars.id);
+      if (err) throw err;
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['team'] }),
+  });
+
   return (
     <div className="page">
       <h2>Add someone</h2>
@@ -148,6 +160,7 @@ export function Team({ profile }: { profile: Profile }) {
             <th>Name</th>
             <th>Phone</th>
             <th>Role</th>
+            <th>GPS updates</th>
             <th>Status</th>
             <th></th>
           </tr>
@@ -158,6 +171,22 @@ export function Team({ profile }: { profile: Profile }) {
               <td>{m.full_name || '—'}</td>
               <td>{m.phone_e164}</td>
               <td>{m.role}</td>
+              <td>
+                <select
+                  value={m.ping_interval_s}
+                  title="How often this phone records a location while clocked in. Applies from the next sync; faster settings use more battery."
+                  onChange={(e) => setInterval_.mutate({ id: m.id, seconds: Number(e.target.value) })}
+                >
+                  {PING_INTERVALS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                  {!PING_INTERVALS.some((o) => o.value === m.ping_interval_s) && (
+                    <option value={m.ping_interval_s}>{m.ping_interval_s}s</option>
+                  )}
+                </select>
+              </td>
               <td>{m.is_active ? 'active' : 'deactivated'}</td>
               <td>
                 {m.id !== profile.id && (
@@ -173,6 +202,10 @@ export function Team({ profile }: { profile: Profile }) {
           ))}
         </tbody>
       </table>
+      <p className="dim small">
+        GPS cadence and on-demand location checks only ever apply while someone is clocked in —
+        the server refuses both otherwise, and workers can see every location check in their app.
+      </p>
     </div>
   );
 }

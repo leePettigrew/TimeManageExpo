@@ -5,7 +5,25 @@ export interface Profile {
   full_name: string;
   phone_e164: string;
   is_active: boolean;
+  ping_interval_s: number;
 }
+
+export interface LocationRequest {
+  id: string;
+  company_id: string;
+  worker_id: string;
+  requested_by: string;
+  created_at: string;
+  fulfilled_at: string | null;
+}
+
+export const PING_INTERVALS: { value: number; label: string }[] = [
+  { value: 60, label: 'Every minute' },
+  { value: 90, label: 'Every 1.5 min (default)' },
+  { value: 180, label: 'Every 3 min' },
+  { value: 300, label: 'Every 5 min' },
+  { value: 900, label: 'Every 15 min (battery saver)' },
+];
 
 export interface Shift {
   id: string;

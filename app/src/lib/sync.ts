@@ -16,9 +16,13 @@ import {
   markPingsSynced,
   serverShiftIdFor,
   vacuumOutbox,
+  insertPings,
+  nextPingSeq,
   kvGet,
   kvSet,
 } from './outbox';
+import { getFix } from './location';
+import { uuidv7 } from './ids';
 
 export interface SyncStatus {
   running: boolean;
@@ -71,6 +75,10 @@ export function startSyncTriggers(): void {
       void flush();
     }
   });
+  // heartbeat while the process is alive (the foreground service keeps it
+  // alive on-shift): picks up manager setting changes and location requests
+  // even when the phone sits still and the GPS task has nothing to deliver
+  setInterval(() => void flush(), 4 * 60_000);
 }
 
 function scheduleRetry() {
@@ -144,6 +152,11 @@ export async function flush(): Promise<SyncStatus> {
       else if (isNetworkError(error)) throw new OfflineError();
     }
 
+    // manager controls: refresh the ping-interval setting, and answer any
+    // pending "locate now" request with an immediate fix (only mid-shift —
+    // the server refuses to create requests otherwise)
+    await refreshLocationControls();
+
     // 2) ping batches, per shift, only once the shift's clock-in has a server id
     const shiftsWithPings = await clockEventIdsWithPendingPings();
     for (const clockEventId of shiftsWithPings) {
@@ -210,5 +223,55 @@ export async function flush(): Promise<SyncStatus> {
 class OfflineError extends Error {
   constructor() {
     super('offline');
+  }
+}
+
+async function refreshLocationControls(): Promise<void> {
+  try {
+    const { data: session } = await supabase.auth.getSession();
+    const uid = session.session?.user.id;
+    if (!uid) return;
+
+    // cache the manager-set cadence; the breadcrumb task applies it
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('ping_interval_s')
+      .eq('id', uid)
+      .maybeSingle();
+    if (profile?.ping_interval_s) {
+      await kvSet('ping_interval_s', String(profile.ping_interval_s));
+    }
+
+    // pending "where are you now?" → take one immediate fix and queue it;
+    // the ping-upload stage of this same flush delivers it
+    const { data: requests } = await supabase
+      .from('location_requests')
+      .select('id')
+      .is('fulfilled_at', null)
+      .limit(1);
+    if (!requests || requests.length === 0) return;
+
+    const rawShift = await kvGet('open_shift');
+    if (!rawShift) return; // no shift: nothing to answer (server shouldn't allow this state)
+    const { clockEventId } = JSON.parse(rawShift) as { clockEventId: string };
+
+    const fix = await getFix(15_000);
+    if (!fix) return; // no GPS right now; the next breadcrumb answers it instead
+    await insertPings([
+      {
+        id: uuidv7(),
+        clockEventId,
+        seq: await nextPingSeq(clockEventId),
+        deviceAt: fix.deviceAt,
+        lat: fix.lat,
+        lng: fix.lng,
+        accuracyM: fix.accuracyM,
+        speedMps: null,
+        mocked: fix.mocked,
+        batteryPct: fix.batteryPct,
+      },
+    ]);
+  } catch {
+    // best effort — never let a locate request break the sync loop
   }
 }

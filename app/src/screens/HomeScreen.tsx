@@ -8,6 +8,7 @@ import { useSession } from '../state/session';
 import { clockIn, clockOut, getLocalShift, reconcileWithServer, refreshLocalShiftFromOutbox, LocalShift } from '../lib/shift';
 import { flush, onSyncStatus, SyncStatus } from '../lib/sync';
 import { pendingCounts, kvGet } from '../lib/outbox';
+import { supabase } from '../lib/supabase';
 import { TeamScreen } from './TeamScreen';
 
 function batteryAdvice(): string {
@@ -40,6 +41,7 @@ export function HomeScreen() {
   const [pending, setPending] = useState({ events: 0, pings: 0 });
   const [trail, setTrail] = useState<string>('off');
   const [showBatteryHelp, setShowBatteryHelp] = useState(false);
+  const [locationChecks, setLocationChecks] = useState(0);
   const [, forceTick] = useState(0);
 
   const refresh = useCallback(async () => {
@@ -47,6 +49,18 @@ export function HomeScreen() {
     setShift(await getLocalShift());
     setPending(await pendingCounts());
     setTrail((await kvGet('breadcrumbs_state')) ?? 'off');
+    // transparency: workers see when their location was checked (best effort)
+    try {
+      const midnight = new Date();
+      midnight.setHours(0, 0, 0, 0);
+      const { data } = await supabase
+        .from('location_requests')
+        .select('id')
+        .gte('created_at', midnight.toISOString());
+      setLocationChecks(data?.length ?? 0);
+    } catch {
+      /* offline — keep last value */
+    }
   }, []);
 
   useEffect(() => {
@@ -162,6 +176,11 @@ export function HomeScreen() {
       )}
 
       <View style={styles.statusRow}>
+        {locationChecks > 0 ? (
+          <Text style={styles.badgeInfo}>
+            📍 Your manager checked your location {locationChecks}× today
+          </Text>
+        ) : null}
         {offline ? <Text style={styles.badgeWarn}>⚠ No signal — saving on phone</Text> : null}
         {queued > 0 ? (
           <Text style={styles.badgeInfo}>

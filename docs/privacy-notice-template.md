@@ -11,7 +11,10 @@
 ## What is collected
 
 - Clock-in and clock-out times, with GPS position at each event
-- Your location roughly every 2–5 minutes **only while you are clocked in**
+- Your location at a set interval (between every 1 and every 15 minutes,
+  configured by your employer) **only while you are clocked in**
+- Your employer may request a one-off location update **while you are clocked
+  in**; every such request is logged and visible to you in the app
 - Phone battery level and GPS accuracy with each location point (to tell a
   dead battery apart from a switched-off tracker)
 - Your phone number (sign-in) and device model
