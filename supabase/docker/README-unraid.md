@@ -44,10 +44,13 @@ explicit keeps ownership obvious):
 
 ```sh
 mkdir -p /mnt/user/appdata/timetable/db/data \
-         /mnt/user/appdata/timetable/db/config \
          /mnt/user/appdata/timetable/studio/snippets \
          /mnt/user/appdata/timetable/studio/edge-functions
 ```
+
+(Postgres's `/etc/postgresql-custom` key material lives in a Docker named
+volume, not under `DATA_DIR` — it must copy its defaults out of the image on
+first use, which only named volumes do.)
 
 Postgres data benefits massively from living on the cache pool (SSD). If
 `appdata` is a cache-preferred share (the Unraid default) you are done;

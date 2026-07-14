@@ -320,9 +320,13 @@ services:
       - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
       # PGDATA — persisted on the Unraid array/cache
       - ${DATA_DIR:-/mnt/user/appdata/timetable}/db/data:/var/lib/postgresql/data
-      # pgsodium/vault key material — must survive restarts (bind mount
-      # replaces the official db-config named volume)
-      - ${DATA_DIR:-/mnt/user/appdata/timetable}/db/config:/etc/postgresql-custom
+      # pgsodium/vault key material + generated config includes. MUST be a
+      # named volume, not a bind mount: the image ships files in
+      # /etc/postgresql-custom that postgresql.conf `include`s, and only a
+      # named volume copies them out of the image on first use — an empty
+      # bind mount shadows them and Postgres dies with
+      # 'configuration file "/etc/postgresql/postgresql.conf" contains errors'
+      - db-config:/etc/postgresql-custom
     healthcheck:
       test:
         [
@@ -354,3 +358,6 @@ services:
         "-c",
         "log_min_messages=fatal" # prevents Realtime polling queries from appearing in logs
       ]
+
+volumes:
+  db-config:
