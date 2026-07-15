@@ -24,6 +24,13 @@ app/ios/
 *.key
 *.mobileprovision
 
+# Firebase FCM V1 service-account key — SECRET, uploaded to EAS, never commit.
+# (google-services.json IS safe to commit — public identifiers only — so it is
+#  deliberately NOT ignored; EAS Build needs it in the repo.)
+**/google-service-account*.json
+**/*serviceaccount*.json
+app/fcm-*.json
+
 # OS / editor
 .DS_Store
 Thumbs.db
