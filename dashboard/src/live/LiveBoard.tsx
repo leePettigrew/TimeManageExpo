@@ -124,7 +124,10 @@ export function LiveBoard() {
         </h2>
         {openShifts.isLoading && <p className="dim">Loading…</p>}
         {!openShifts.isLoading && shifts.length === 0 && (
-          <p className="dim">Nobody is clocked in right now.</p>
+          <p className="empty-hint">
+            Nobody is clocked in right now. When a worker clocks in on their phone, they&apos;ll
+            appear here and on the map within seconds.
+          </p>
         )}
         {shifts.map((s) => {
           const p = pingByWorker.get(s.worker_id);

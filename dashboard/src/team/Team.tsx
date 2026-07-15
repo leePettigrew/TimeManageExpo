@@ -153,9 +153,7 @@ export function Team({ profile }: { profile: Profile }) {
                   <td>{i.phone_e164}</td>
                   <td>{i.role}</td>
                   <td>
-                    <span className="badge info" style={{ fontSize: 15, letterSpacing: 3 }}>
-                      {i.code}
-                    </span>
+                    <span className="code-pill">{i.code}</span>
                   </td>
                   <td>
                     <button className="ghost small" onClick={() => removeInvite.mutate(i.id)}>

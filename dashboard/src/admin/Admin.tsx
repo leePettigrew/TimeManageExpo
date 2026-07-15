@@ -269,9 +269,7 @@ export function Admin() {
                   <td>{i.phone_e164}</td>
                   <td>{i.role}</td>
                   <td>
-                    <span className="badge info" style={{ fontSize: 14, letterSpacing: 2 }}>
-                      {i.code}
-                    </span>
+                    <span className="code-pill">{i.code}</span>
                   </td>
                   <td className="dim">{new Date(i.expires_at).toLocaleDateString('en-IE')}</td>
                   <td>
