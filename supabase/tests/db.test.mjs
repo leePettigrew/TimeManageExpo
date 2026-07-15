@@ -575,10 +575,16 @@ test('ping_interval_s: manager-tunable within bounds, same company only', async 
     c.query(`update profiles set ping_interval_s = 300 where id = $1`, [IDS.workerA]));
   assert.equal(res.rowCount, 1);
 
-  // bounds enforced by the check constraint
+  // 5s is now the floor (fast-tracking option); below that is rejected
+  await asUser(IDS.managerA, (c) =>
+    c.query(`update profiles set ping_interval_s = 5 where id = $1`, [IDS.workerA]));
   await expectError(
     asUser(IDS.managerA, (c) =>
-      c.query(`update profiles set ping_interval_s = 5 where id = $1`, [IDS.workerA])),
+      c.query(`update profiles set ping_interval_s = 4 where id = $1`, [IDS.workerA])),
+    'check constraint');
+  await expectError(
+    asUser(IDS.managerA, (c) =>
+      c.query(`update profiles set ping_interval_s = 901 where id = $1`, [IDS.workerA])),
     'check constraint');
 
   // cross-tenant tuning silently matches zero rows
@@ -591,10 +597,11 @@ test('ping_interval_s: manager-tunable within bounds, same company only', async 
     c.query(`update profiles set ping_interval_s = 60 where id = $1`, [IDS.workerA]));
   assert.equal(self.rowCount, 0);
 
-  // the worker can read their own setting (the app applies it)
+  // the worker can read their own setting (the app applies it); last valid
+  // write was the 5s fast-tracking floor
   const { rows } = await asUser(IDS.workerA, (c) =>
     c.query(`select ping_interval_s from profiles where id = $1`, [IDS.workerA]));
-  assert.equal(rows[0].ping_interval_s, 300);
+  assert.equal(rows[0].ping_interval_s, 5);
 });
 
 // ── maintenance jobs ─────────────────────────────────────────────────────────

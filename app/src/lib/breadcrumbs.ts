@@ -68,12 +68,14 @@ TaskManager.defineTask(BREADCRUMB_TASK, async ({ data, error }) => {
 export type BreadcrumbState = 'on' | 'off' | 'denied';
 
 const DEFAULT_INTERVAL_S = 90;
+const MIN_INTERVAL_S = 5; // fast-tracking floor (heavy battery)
+const MAX_INTERVAL_S = 900;
 
 /** Manager-set ping interval (seconds), cached from the server by the sync engine. */
 async function desiredIntervalS(): Promise<number> {
   const raw = await kvGet('ping_interval_s');
   const n = raw ? parseInt(raw, 10) : DEFAULT_INTERVAL_S;
-  return Number.isFinite(n) ? Math.min(Math.max(n, 60), 900) : DEFAULT_INTERVAL_S;
+  return Number.isFinite(n) ? Math.min(Math.max(n, MIN_INTERVAL_S), MAX_INTERVAL_S) : DEFAULT_INTERVAL_S;
 }
 
 /**
@@ -95,13 +97,20 @@ export async function startBreadcrumbs(): Promise<BreadcrumbState> {
 }
 
 async function startTaskWithInterval(intervalS: number): Promise<BreadcrumbState> {
-  // batch delivery: fast settings deliver faster (fresher map), slow settings
-  // batch harder (battery); clamped 2–5 minutes
-  const deferredMs = Math.min(Math.max(intervalS * 2, 120), 300) * 1000;
+  const fast = intervalS < 60; // sub-minute = high-resolution mode
+  // Batch delivery: slow modes batch hard for battery (up to 5 min); fast
+  // modes deliver promptly (~20s) so the map feels near-live. iOS delivers
+  // by distance/deferral, Android honours timeInterval while the service lives.
+  const deferredMs = fast ? 20_000 : Math.min(Math.max(intervalS * 2, 120), 300) * 1000;
+  // distanceInterval acts as a movement gate: keep 30 m for normal shifts (no
+  // redundant points while stationary in a house), but drop it for fast modes
+  // so "every N seconds" is honoured even when standing still.
+  const distanceInterval = fast ? 0 : 30;
+
   await Location.startLocationUpdatesAsync(BREADCRUMB_TASK, {
-    accuracy: Location.Accuracy.Balanced,
+    accuracy: fast ? Location.Accuracy.High : Location.Accuracy.Balanced,
     timeInterval: intervalS * 1000, // Android: ping cadence while moving
-    distanceInterval: 30,           // suppress redundant points inside a house
+    distanceInterval,
     deferredUpdatesInterval: deferredMs,
     pausesUpdatesAutomatically: false, // iOS may otherwise pause and never resume
     activityType: Location.ActivityType.Other,

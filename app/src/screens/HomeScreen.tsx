@@ -12,6 +12,7 @@ import { pendingCounts, kvGet } from '../lib/outbox';
 import { supabase } from '../lib/supabase';
 import { TeamScreen } from './TeamScreen';
 import { HoursScreen } from './HoursScreen';
+import { DiagnosticsScreen } from './DiagnosticsScreen';
 
 function batteryAdvice(): string {
   const brand = (Device.manufacturer ?? '').toLowerCase();
@@ -38,7 +39,7 @@ export function HomeScreen() {
   const { profile, signOut } = useSession();
   const [shift, setShift] = useState<LocalShift | null>(null);
   const [busy, setBusy] = useState(false);
-  const [view, setView] = useState<'home' | 'team' | 'hours'>('home');
+  const [view, setView] = useState<'home' | 'team' | 'hours' | 'diag'>('home');
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [pending, setPending] = useState({ events: 0, pings: 0 });
   const [trail, setTrail] = useState<string>('off');
@@ -110,6 +111,7 @@ export function HomeScreen() {
 
   if (view === 'team') return <TeamScreen onBack={() => setView('home')} />;
   if (view === 'hours') return <HoursScreen onBack={() => setView('home')} />;
+  if (view === 'diag') return <DiagnosticsScreen onBack={() => setView('home')} />;
 
   const offline = sync?.lastResult === 'offline';
   const queued = pending.events + pending.pings;
@@ -214,6 +216,7 @@ export function HomeScreen() {
 
       <View style={styles.footer}>
         <FooterAction icon="stopwatch-outline" label="My hours" onPress={() => setView('hours')} />
+        <FooterAction icon="pulse-outline" label="Tracking" onPress={() => setView('diag')} />
         {profile?.role === 'manager' ? (
           <FooterAction icon="people-outline" label="Team" onPress={() => setView('team')} />
         ) : null}

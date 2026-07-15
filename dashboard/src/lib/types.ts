@@ -25,6 +25,9 @@ export interface LocationRequest {
 }
 
 export const PING_INTERVALS: { value: number; label: string }[] = [
+  { value: 5, label: 'Every 5 sec ⚡ heavy battery' },
+  { value: 15, label: 'Every 15 sec ⚡ high battery' },
+  { value: 30, label: 'Every 30 sec' },
   { value: 60, label: 'Every minute' },
   { value: 90, label: 'Every 1.5 min (default)' },
   { value: 180, label: 'Every 3 min' },

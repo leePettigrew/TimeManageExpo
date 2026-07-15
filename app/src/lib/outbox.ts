@@ -269,6 +269,38 @@ export async function pendingCounts(): Promise<{ events: number; pings: number }
   return { events: e?.n ?? 0, pings: p?.n ?? 0 };
 }
 
+export interface PingStats {
+  total: number;
+  synced: number;
+  lastDeviceAt: string | null;
+  lastAccuracyM: number | null;
+}
+
+/** Capture stats for one local shift — powers the on-device diagnostics view. */
+export async function pingStatsFor(clockEventId: string): Promise<PingStats> {
+  const db = await open();
+  const row = await db.getFirstAsync<{
+    total: number;
+    synced: number;
+    last_at: string | null;
+    last_acc: number | null;
+  }>(
+    `select count(*) total,
+            sum(case when synced = 1 then 1 else 0 end) synced,
+            max(device_at) last_at,
+            (select accuracy_m from pings p2 where p2.clock_event_id = ?
+             order by device_at desc limit 1) last_acc
+     from pings where clock_event_id = ?`,
+    [clockEventId, clockEventId],
+  );
+  return {
+    total: row?.total ?? 0,
+    synced: row?.synced ?? 0,
+    lastDeviceAt: row?.last_at ?? null,
+    lastAccuracyM: row?.last_acc ?? null,
+  };
+}
+
 /** Trim old rows so the device DB never grows unbounded (device-side GDPR). */
 export async function vacuumOutbox(): Promise<void> {
   const db = await open();
