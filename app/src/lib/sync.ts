@@ -18,6 +18,7 @@ import {
   vacuumOutbox,
   insertPings,
   nextPingSeq,
+  pendingCounts,
   kvGet,
   kvSet,
 } from './outbox';
@@ -75,10 +76,18 @@ export function startSyncTriggers(): void {
       void flush();
     }
   });
-  // heartbeat while the process is alive (the foreground service keeps it
-  // alive on-shift): picks up manager setting changes and location requests
-  // even when the phone sits still and the GPS task has nothing to deliver
-  setInterval(() => void flush(), 4 * 60_000);
+  // Always-on auto-sync: every 30s, if anything is queued or a shift is open,
+  // drain it. Keeps the queue empty without the worker ever tapping "Send",
+  // and picks up manager settings / locate requests near-real-time on-shift.
+  setInterval(async () => {
+    try {
+      const counts = await pendingCounts();
+      const shift = await kvGet('open_shift');
+      if (counts.events + counts.pings > 0 || shift) void flush();
+    } catch {
+      /* ignore */
+    }
+  }, 30_000);
 }
 
 function scheduleRetry() {
@@ -134,8 +143,14 @@ export async function flush(): Promise<SyncStatus> {
         // e.g. replayed clock-in raced an existing open shift: keep the row as
         // evidence, stop retrying, let reconcile() fix the local view
         await markClockEventDead(e.id, code);
+      } else if (e.attempts + 1 >= 6) {
+        // an unrecognised server error that has failed 6 times is not a passing
+        // hiccup — park it (kept as evidence, synced=2) so it stops blocking
+        // everything queued behind it. reconcileWithServer repairs local state.
+        await markClockEventDead(e.id, `stuck:${code}:${error.message}`.slice(0, 120));
       } else {
-        // transient server error: stop here so later events keep their order
+        // transient server error: retry, but stop the loop so later events keep
+        // their order (a clock_out must never sync before its clock_in)
         await markClockEventFailed(e.id, error.message);
         throw error;
       }

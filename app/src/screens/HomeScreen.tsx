@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase';
 import { TeamScreen } from './TeamScreen';
 import { HoursScreen } from './HoursScreen';
 import { DiagnosticsScreen } from './DiagnosticsScreen';
+import { requestIgnoreBatteryOptimizations, openAppSettings } from '../lib/batteryReliability';
 
 function batteryAdvice(): string {
   const brand = (Device.manufacturer ?? '').toLowerCase();
@@ -177,7 +178,23 @@ export function HomeScreen() {
         </View>
 
         {queued > 0 ? (
-          <Button title="Send now" icon="paper-plane-outline" onPress={() => void flush()} variant="subtle" />
+          <>
+            <Button
+              title="Send now"
+              icon="paper-plane-outline"
+              onPress={() => void flush().then(refresh)}
+              variant="subtle"
+            />
+            {sync?.lastResult === 'error' ? (
+              <Text style={styles.syncNote}>
+                Couldn&apos;t send — it&apos;ll keep trying automatically. See Tracking for details.
+              </Text>
+            ) : offline ? (
+              <Text style={styles.syncNote}>No signal — these send automatically once you&apos;re back online.</Text>
+            ) : (
+              <Text style={styles.syncNote}>Sending automatically in the background…</Text>
+            )}
+          </>
         ) : null}
 
         {shift && trail === 'denied' ? (
@@ -201,11 +218,19 @@ export function HomeScreen() {
             </Pressable>
             {showBatteryHelp ? (
               <View style={styles.helpBox}>
+                <Text style={styles.helpText}>
+                  Tap below to let tracking keep running when your phone is locked. Then:
+                </Text>
                 <Text style={styles.helpText}>{batteryAdvice()}</Text>
+                <Button
+                  title="Keep tracking when locked"
+                  icon="battery-charging-outline"
+                  onPress={() => void requestIgnoreBatteryOptimizations()}
+                />
                 <Button
                   title="Open app settings"
                   icon="settings-outline"
-                  onPress={() => void Linking.openSettings()}
+                  onPress={() => void openAppSettings()}
                   variant="ghost"
                 />
               </View>
@@ -275,6 +300,7 @@ const styles = StyleSheet.create({
   helpLink: { color: colors.info, fontSize: 14, fontWeight: '600' },
   helpBox: { gap: spacing(1) },
   helpText: { color: colors.textDim, fontSize: 14, lineHeight: 20 },
+  syncNote: { color: colors.textDim, fontSize: 13, textAlign: 'center', lineHeight: 18 },
   footer: {
     flexDirection: 'row',
     borderTopWidth: 1,

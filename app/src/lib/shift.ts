@@ -23,6 +23,7 @@ import {
   BreadcrumbState,
 } from './breadcrumbs';
 import { scheduleClockOutReminder, cancelClockOutReminder } from './reminders';
+import { requestBatteryExemptionOnce } from './batteryReliability';
 
 export interface LocalShift {
   clockEventId: string;      // local handle; pings attach to this
@@ -80,6 +81,10 @@ export async function clockIn(): Promise<LocalShift> {
   const trail: BreadcrumbState = await startBreadcrumbs().catch(() => 'off' as const);
   await kvSet('breadcrumbs_state', trail);
   await scheduleClockOutReminder();
+  // first shift only: ask Android to keep tracking alive when the phone is
+  // locked/idle (the big lever for background reliability). Fire-and-forget so
+  // it never blocks the clock-in.
+  if (trail === 'on') void requestBatteryExemptionOnce();
 
   void flush().then(() => refreshLocalShiftFromOutbox());
   return shift;

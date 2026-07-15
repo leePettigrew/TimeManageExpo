@@ -98,14 +98,15 @@ export async function startBreadcrumbs(): Promise<BreadcrumbState> {
 
 async function startTaskWithInterval(intervalS: number): Promise<BreadcrumbState> {
   const fast = intervalS < 60; // sub-minute = high-resolution mode
-  // Batch delivery: slow modes batch hard for battery (up to 5 min); fast
-  // modes deliver promptly (~20s) so the map feels near-live. iOS delivers
-  // by distance/deferral, Android honours timeInterval while the service lives.
-  const deferredMs = fast ? 20_000 : Math.min(Math.max(intervalS * 2, 120), 300) * 1000;
-  // distanceInterval acts as a movement gate: keep 30 m for normal shifts (no
-  // redundant points while stationary in a house), but drop it for fast modes
-  // so "every N seconds" is honoured even when standing still.
-  const distanceInterval = fast ? 0 : 30;
+  // Delivery latency (how soon a captured point reaches the server/map). The
+  // GPS chip is the battery cost, not the JS wake-up, so delivering promptly
+  // is cheap once tracking is already on: 15s for fast modes, 60s otherwise —
+  // so the live board never lags more than ~1 min behind a moving worker.
+  const deferredMs = fast ? 15_000 : 60_000;
+  // distanceInterval is a movement gate. Fast modes: 0 (report even when
+  // standing still — true real-time). Normal modes: 20 m — enough to suppress
+  // GPS jitter while parked, small enough that a moving worker still updates.
+  const distanceInterval = fast ? 0 : 20;
 
   await Location.startLocationUpdatesAsync(BREADCRUMB_TASK, {
     accuracy: fast ? Location.Accuracy.High : Location.Accuracy.Balanced,
