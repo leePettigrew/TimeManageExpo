@@ -11,6 +11,7 @@ interface Invite {
   phone_e164: string;
   role: 'manager' | 'worker';
   full_name: string;
+  code: string;
   claimed_at: string | null;
   expires_at: string;
 }
@@ -127,7 +128,8 @@ export function Team({ profile }: { profile: Profile }) {
         </button>
       </div>
       <p className="dim small">
-        They install the app, sign in with this number, and they&apos;re in — no passwords.
+        They install the app, tap <strong>&quot;I have an invite code&quot;</strong>, and enter
+        their number plus the code below — no text messages needed.
       </p>
       {error && <p className="error">{error}</p>}
 
@@ -135,12 +137,26 @@ export function Team({ profile }: { profile: Profile }) {
         <>
           <h3>Waiting to join</h3>
           <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Role</th>
+                <th>Their invite code</th>
+                <th></th>
+              </tr>
+            </thead>
             <tbody>
               {(invites.data ?? []).map((i) => (
                 <tr key={i.id}>
                   <td>{i.full_name || '—'}</td>
                   <td>{i.phone_e164}</td>
                   <td>{i.role}</td>
+                  <td>
+                    <span className="badge info" style={{ fontSize: 15, letterSpacing: 3 }}>
+                      {i.code}
+                    </span>
+                  </td>
                   <td>
                     <button className="ghost small" onClick={() => removeInvite.mutate(i.id)}>
                       Cancel invite

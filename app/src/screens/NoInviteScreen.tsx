@@ -21,7 +21,7 @@ export function NoInviteScreen() {
         </Text>
       </Card>
       <Button title="Check again" icon="refresh-outline" onPress={retry} />
-      <Button title="Use a different number" onPress={() => void signOut()} variant="ghost" />
+      <Button title="Sign in a different way" onPress={() => void signOut()} variant="ghost" />
     </Screen>
   );
 }

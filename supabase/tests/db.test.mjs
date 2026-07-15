@@ -417,6 +417,105 @@ test('simulated day: clock in, drive between 3 houses, clock out — timesheet a
   assert.ok(!flags[0].anomaly_flags.includes('impossible_speed'), 'honest day must not be flagged');
 });
 
+// ── operator + invite codes (0008) ───────────────────────────────────────────
+
+test('operator: cross-company read, admin RPCs; mortals refused', async () => {
+  // promote workerA to operator (host-owner action, done via psql in prod)
+  await pool.query(`update profiles set is_operator = true where id = $1`, [IDS.workerA]);
+
+  // operator now reads other companies' rows
+  const { rows: companies } = await asUser(IDS.workerA, (c) => c.query(`select id from companies`));
+  assert.ok(companies.length >= 2, 'operator should see all companies');
+  const { rows: bShifts } = await asUser(IDS.workerA, (c) =>
+    c.query(`select id from shifts where company_id = $1`, [IDS.companyB]));
+  assert.ok(bShifts.length >= 1, 'operator should see company B shifts');
+
+  // non-operators cannot call admin RPCs
+  await expectError(
+    asUser(IDS.managerA, (c) => c.query(`select admin_create_company('Evil Co', '+353870001111')`)),
+    'operator_only');
+
+  // operator creates a company + manager invite in one call
+  const companyId = await asUser(IDS.workerA, async (c) => {
+    const { rows } = await c.query(
+      `select admin_create_company('Gamma Plumbing', '+353870002222', 'Gary') id`);
+    return rows[0].id;
+  });
+  const { rows: invites } = await pool.query(
+    `select role, code from invites where company_id = $1`, [companyId]);
+  assert.equal(invites[0].role, 'manager');
+  assert.match(invites[0].code, /^\d{6}$/);
+
+  await asUser(IDS.workerA, (c) => c.query(`select admin_rename_company($1, 'Gamma Plumbing Ltd')`, [companyId]));
+  const { rows: renamed } = await pool.query(`select name from companies where id = $1`, [companyId]);
+  assert.equal(renamed[0].name, 'Gamma Plumbing Ltd');
+
+  // deactivate / reactivate someone in another company
+  await asUser(IDS.workerA, (c) => c.query(`select admin_set_profile_active($1, false)`, [IDS.workerB]));
+  const { rows: deact } = await pool.query(`select is_active from profiles where id = $1`, [IDS.workerB]);
+  assert.equal(deact[0].is_active, false);
+  await asUser(IDS.workerA, (c) => c.query(`select admin_set_profile_active($1, true)`, [IDS.workerB]));
+
+  await pool.query(`update profiles set is_operator = false where id = $1`, [IDS.workerA]);
+});
+
+test('claim_invite_with_code: anonymous join with phone + code, wrong codes counted', async () => {
+  // manager invites a phone number; the code comes back on the row
+  const { rows: invRows } = await asUser(IDS.managerA, async (c) => {
+    await c.query(
+      `insert into invites (company_id, phone_e164, role, full_name, created_by)
+       values ($1, '+353870003333', 'worker', 'Code Joiner', $2)`,
+      [IDS.companyA, IDS.managerA]);
+    return c.query(`select code from invites where phone_e164 = '+353870003333' and claimed_at is null`);
+  });
+  const code = invRows.rows ? invRows.rows[0].code : invRows[0].code;
+
+  // an "anonymous" auth user (no phone on the account)
+  const anonId = randomUUID();
+  await pool.query(`insert into auth.users (id, phone) values ($1, null)`, [anonId]);
+
+  // wrong code → NULL result, attempt counted, invite still claimable
+  const wrong = await asUser(anonId, async (c) => {
+    const { rows } = await c.query(`select claim_invite_with_code('087 000 3333', '000000') p`);
+    return rows[0].p;
+  });
+  assert.equal(wrong, null);
+  const { rows: attempts } = await pool.query(
+    `select code_attempts from invites where phone_e164 = '+353870003333' and claimed_at is null`);
+  assert.equal(attempts[0].code_attempts, 1);
+
+  // right code → profile bound to the inviting company
+  const profile = await asUser(anonId, async (c) => {
+    const { rows } = await c.query(`select * from claim_invite_with_code('0870003333', $1)`, [code]);
+    return rows[0];
+  });
+  assert.equal(profile.company_id, IDS.companyA);
+  assert.equal(profile.role, 'worker');
+  assert.equal(profile.phone_e164, '+353870003333');
+
+  // idempotent for the same auth user
+  const again = await asUser(anonId, async (c) => {
+    const { rows } = await c.query(`select * from claim_invite_with_code('0870003333', $1)`, [code]);
+    return rows[0];
+  });
+  assert.equal(again.id, profile.id);
+
+  // and the code cannot be replayed by someone else
+  const thief = randomUUID();
+  await pool.query(`insert into auth.users (id, phone) values ($1, null)`, [thief]);
+  await expectError(
+    asUser(thief, (c) => c.query(`select claim_invite_with_code('0870003333', $1)`, [code])),
+    'no_invite');
+
+  // an anonymous session that has NOT claimed an invite reads nothing
+  const anon2 = randomUUID();
+  await pool.query(`insert into auth.users (id, phone) values ($1, null)`, [anon2]);
+  for (const t of ['companies', 'profiles', 'shifts', 'invites']) {
+    const { rows } = await asUser(anon2, (c) => c.query(`select * from ${t}`));
+    assert.equal(rows.length, 0, `unclaimed anonymous user can read ${t}`);
+  }
+});
+
 // ── location controls (0007) ─────────────────────────────────────────────────
 
 test('request_location: manager-only, mid-shift only, fulfilled by fresh pings', async () => {

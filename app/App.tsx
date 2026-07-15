@@ -6,6 +6,7 @@ import * as Updates from 'expo-updates';
 import { SessionProvider, useSession } from './src/state/session';
 import { PhoneLoginScreen } from './src/screens/PhoneLoginScreen';
 import { OtpScreen } from './src/screens/OtpScreen';
+import { InviteCodeScreen } from './src/screens/InviteCodeScreen';
 import { NoInviteScreen } from './src/screens/NoInviteScreen';
 import { DisclosureScreen } from './src/screens/DisclosureScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -17,10 +18,14 @@ import { startSyncTriggers } from './src/lib/sync';
 function Router() {
   const { phase, errorMessage, retry } = useSession();
   const [otpPhone, setOtpPhone] = useState<string | null>(null);
+  const [authView, setAuthView] = useState<'phone' | 'code'>('phone');
 
   useEffect(() => {
     if (phase === 'ready') startSyncTriggers();
-    if (phase === 'signedOut') setOtpPhone(null);
+    if (phase === 'signedOut') {
+      setOtpPhone(null);
+      setAuthView('phone');
+    }
   }, [phase]);
 
   switch (phase) {
@@ -31,10 +36,11 @@ function Router() {
         </View>
       );
     case 'signedOut':
+      if (authView === 'code') return <InviteCodeScreen onBack={() => setAuthView('phone')} />;
       return otpPhone ? (
         <OtpScreen phone={otpPhone} onBack={() => setOtpPhone(null)} />
       ) : (
-        <PhoneLoginScreen onCodeSent={setOtpPhone} />
+        <PhoneLoginScreen onCodeSent={setOtpPhone} onUseInviteCode={() => setAuthView('code')} />
       );
     case 'needsInvite':
       return <NoInviteScreen />;

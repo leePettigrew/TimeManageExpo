@@ -16,7 +16,13 @@ export function normalisePhone(input: string): string | null {
   return null;
 }
 
-export function PhoneLoginScreen({ onCodeSent }: { onCodeSent: (phone: string) => void }) {
+export function PhoneLoginScreen({
+  onCodeSent,
+  onUseInviteCode,
+}: {
+  onCodeSent: (phone: string) => void;
+  onUseInviteCode: () => void;
+}) {
   const [raw, setRaw] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +74,7 @@ export function PhoneLoginScreen({ onCodeSent }: { onCodeSent: (phone: string) =
       <Text style={styles.hint}>Use the number your employer registered — we'll text you a code.</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button title="Text me a code" icon="chatbubble-ellipses-outline" onPress={submit} loading={busy} />
+      <Button title="I have an invite code" icon="key-outline" onPress={onUseInviteCode} variant="ghost" />
     </Screen>
   );
 }

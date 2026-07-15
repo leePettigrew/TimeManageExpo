@@ -8,6 +8,7 @@ import { supabase, rpcErrorCode, isNetworkError } from '../lib/supabase';
 import { NOTICE_VERSION } from '../lib/config';
 import { kvGet, kvSet, resetOutbox } from '../lib/outbox';
 import { stopBreadcrumbs } from '../lib/breadcrumbs';
+import { ensureNotificationSetup, cancelClockOutReminder } from '../lib/reminders';
 
 export interface Profile {
   id: string;
@@ -31,6 +32,7 @@ interface SessionContextValue {
   profile: Profile | null;
   errorMessage: string | null;
   acknowledge: () => Promise<void>;
+  claimWithCode: (phone: string, code: string) => Promise<void>;
   retry: () => void;
   signOut: () => Promise<void>;
 }
@@ -128,6 +130,36 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setPhase('ready');
   }, []);
 
+  // SMS-free onboarding: anonymous sign-in + invite code. Throws a
+  // human-readable message on failure so the screen can show it.
+  const claimWithCode = useCallback(
+    async (phone: string, code: string) => {
+      let current = (await supabase.auth.getSession()).data.session;
+      if (!current) {
+        const { error } = await supabase.auth.signInAnonymously();
+        if (error) throw new Error('No connection — get online to finish joining.');
+        current = (await supabase.auth.getSession()).data.session;
+      }
+      const { data, error } = await supabase.rpc('claim_invite_with_code', {
+        p_phone: phone,
+        p_code: code,
+      });
+      if (error) {
+        const c = rpcErrorCode(error);
+        if (c === 'no_invite') throw new Error('No invite for that number — ask your boss to add you.');
+        if (c === 'invite_expired') throw new Error('That invite has expired — ask for a new one.');
+        if (isNetworkError(error)) throw new Error('No connection — try again when you have signal.');
+        throw new Error("Something went wrong — check your number and code.");
+      }
+      const p = (Array.isArray(data) ? data[0] : data) as Profile | null;
+      if (!p) throw new Error("That code isn't right — check it and try again.");
+      await kvSet(KV_PROFILE, JSON.stringify(p));
+      setProfile(p);
+      setPhase('needsAck');
+    },
+    [],
+  );
+
   const retry = useCallback(() => {
     setPhase('loading');
     setErrorMessage(null);
@@ -136,15 +168,22 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     await stopBreadcrumbs();
+    await cancelClockOutReminder();
     await supabase.auth.signOut();
     await resetOutbox();
     setProfile(null);
     setPhase('signedOut');
   }, []);
 
+  // ask for notification permission once the worker is in (used for the
+  // forgot-to-clock-out reminder)
+  useEffect(() => {
+    if (phase === 'ready') void ensureNotificationSetup();
+  }, [phase]);
+
   const value = useMemo(
-    () => ({ phase, session, profile, errorMessage, acknowledge, retry, signOut }),
-    [phase, session, profile, errorMessage, acknowledge, retry, signOut],
+    () => ({ phase, session, profile, errorMessage, acknowledge, claimWithCode, retry, signOut }),
+    [phase, session, profile, errorMessage, acknowledge, claimWithCode, retry, signOut],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

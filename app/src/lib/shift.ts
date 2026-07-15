@@ -22,6 +22,7 @@ import {
   resumeBreadcrumbsIfGranted,
   BreadcrumbState,
 } from './breadcrumbs';
+import { scheduleClockOutReminder, cancelClockOutReminder } from './reminders';
 
 export interface LocalShift {
   clockEventId: string;      // local handle; pings attach to this
@@ -78,6 +79,7 @@ export async function clockIn(): Promise<LocalShift> {
   // here, always after the disclosure screen has been acknowledged)
   const trail: BreadcrumbState = await startBreadcrumbs().catch(() => 'off' as const);
   await kvSet('breadcrumbs_state', trail);
+  await scheduleClockOutReminder();
 
   void flush().then(() => refreshLocalShiftFromOutbox());
   return shift;
@@ -87,6 +89,7 @@ export async function clockIn(): Promise<LocalShift> {
 export async function clockOut(): Promise<void> {
   await stopBreadcrumbs();
   await kvSet('breadcrumbs_state', 'off');
+  await cancelClockOutReminder();
   const id = uuidv7();
   const fix = await getFix();
   await insertClockEvent({

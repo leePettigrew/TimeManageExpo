@@ -6,6 +6,13 @@ export interface Profile {
   phone_e164: string;
   is_active: boolean;
   ping_interval_s: number;
+  is_operator: boolean;
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  created_at: string;
 }
 
 export interface LocationRequest {

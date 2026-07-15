@@ -5,6 +5,7 @@ import { LiveBoard } from './live/LiveBoard';
 import { Timesheets } from './timesheets/Timesheets';
 import { Review } from './review/Review';
 import { Team } from './team/Team';
+import { Admin } from './admin/Admin';
 import { supabase } from './lib/supabase';
 import type { Profile } from './lib/types';
 
@@ -12,7 +13,7 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, retry: 1 } },
 });
 
-type Tab = 'live' | 'timesheets' | 'review' | 'team';
+type Tab = 'live' | 'timesheets' | 'review' | 'team' | 'admin';
 
 function Shell({ profile }: { profile: Profile }) {
   const [tab, setTab] = useState<Tab>('live');
@@ -42,6 +43,7 @@ function Shell({ profile }: { profile: Profile }) {
               ['timesheets', 'Timesheets'],
               ['review', 'Review'],
               ['team', 'Team'],
+              ...(profile.is_operator ? [['admin', 'Admin'] as [Tab, string]] : []),
             ] as [Tab, string][]
           ).map(([key, label]) => (
             <button
@@ -64,6 +66,7 @@ function Shell({ profile }: { profile: Profile }) {
         {tab === 'timesheets' && <Timesheets />}
         {tab === 'review' && <Review />}
         {tab === 'team' && <Team profile={profile} />}
+        {tab === 'admin' && profile.is_operator && <Admin />}
       </main>
     </div>
   );

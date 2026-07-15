@@ -165,6 +165,31 @@ with that phone number (OTP), the app calls `claim_invite()`, and from there
 they invite workers themselves. Invite phone numbers must be E.164
 (`+353...`) to match GoTrue's stored phone.
 
+### Make yourself the operator (super-admin)
+
+Once you (the host owner) have signed into the dashboard at least once — so you
+have a `profiles` row — promote it. This unlocks the **Admin** tab: create /
+rename companies, deactivate anyone, view all invite codes and audit activity,
+all without touching psql again.
+
+```sh
+docker exec supabase-db psql -U postgres -d postgres -c \
+  "update profiles set is_operator = true where phone_e164 = '+353871234567';"
+```
+
+Refresh the dashboard and the **Admin** tab appears. From then on, new companies
+are two clicks in the Admin console — the manager invite code shows right there
+to hand to the boss.
+
+### Invite codes (SMS-free onboarding)
+
+Every invite carries a **6-digit code** shown in the Team tab (and the Admin
+console). A new worker opens the app, taps **"I have an invite code"**, and
+enters their number + the code — no SMS is sent. This needs anonymous sign-in
+enabled (`ENABLE_ANONYMOUS_USERS=true`, the default in `.env.example`). An
+anonymous session that hasn't claimed an invite can read nothing — RLS denies
+everything until `claim_invite_with_code` binds it to a company.
+
 ## 8. Expose it with a free Cloudflare Tunnel
 
 Kong (port `8000`) is the single entry point — never port-forward it or the
