@@ -516,6 +516,51 @@ test('claim_invite_with_code: anonymous join with phone + code, wrong codes coun
   }
 });
 
+// ── push notifications (0010) ────────────────────────────────────────────────
+
+test('register_push_token + locate enqueues a push_outbox job', async () => {
+  // worker registers a device token
+  await asUser(IDS.workerA, (c) =>
+    c.query(`select register_push_token('ExpoPushToken[abc123]', 'android')`));
+  const { rows: tok } = await pool.query(
+    `select worker_id, platform from device_tokens where token = 'ExpoPushToken[abc123]'`);
+  assert.equal(tok[0].worker_id, IDS.workerA);
+  assert.equal(tok[0].platform, 'android');
+
+  // re-registering the same token just updates it (idempotent)
+  await asUser(IDS.workerA, (c) =>
+    c.query(`select register_push_token('ExpoPushToken[abc123]', 'android')`));
+  const { rows: cnt } = await pool.query(`select count(*)::int n from device_tokens`);
+  assert.equal(cnt[0].n, 1);
+
+  // invalid platform rejected
+  await expectError(
+    asUser(IDS.workerA, (c) => c.query(`select register_push_token('t', 'windows')`)),
+    'invalid_platform');
+
+  // clients have no access to the token table at all (not even their own)
+  await expectError(
+    asUser(IDS.managerA, (c) => c.query(`select * from device_tokens`)),
+    'permission denied');
+  await expectError(
+    asUser(IDS.managerA, (c) => c.query(`select * from push_outbox`)),
+    'permission denied');
+
+  // a locate request fires the trigger → push_outbox row enqueued
+  const shift = await asUser(IDS.workerA, async (c) => {
+    const { rows } = await c.query(`select * from clock_in($1, now(), 53.3, -6.2, 9, false, '{}')`, [randomUUID()]);
+    return rows[0];
+  });
+  await asUser(IDS.managerA, (c) => c.query(`select request_location($1)`, [IDS.workerA]));
+  const { rows: jobs } = await pool.query(
+    `select kind, worker_id, sent_at from push_outbox where worker_id = $1`, [IDS.workerA]);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].kind, 'locate');
+  assert.equal(jobs[0].sent_at, null);
+
+  await asUser(IDS.workerA, (c) => c.query(`select clock_out($1, now())`, [randomUUID()]));
+});
+
 // ── location controls (0007) ─────────────────────────────────────────────────
 
 test('request_location: manager-only, mid-shift only, fulfilled by fresh pings', async () => {

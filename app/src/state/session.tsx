@@ -9,6 +9,7 @@ import { NOTICE_VERSION } from '../lib/config';
 import { kvGet, kvSet, resetOutbox } from '../lib/outbox';
 import { stopBreadcrumbs } from '../lib/breadcrumbs';
 import { ensureNotificationSetup, cancelClockOutReminder } from '../lib/reminders';
+import { registerForPush } from '../lib/push';
 
 export interface Profile {
   id: string;
@@ -175,10 +176,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setPhase('signedOut');
   }, []);
 
-  // ask for notification permission once the worker is in (used for the
-  // forgot-to-clock-out reminder)
+  // once the worker is in: set up notifications (forgot-to-clock-out reminder)
+  // and register for push (instant locate). Both no-op gracefully if
+  // unavailable.
   useEffect(() => {
-    if (phase === 'ready') void ensureNotificationSetup();
+    if (phase === 'ready') {
+      void ensureNotificationSetup();
+      void registerForPush();
+    }
   }, [phase]);
 
   const value = useMemo(

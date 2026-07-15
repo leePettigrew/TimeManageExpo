@@ -294,6 +294,44 @@ You can keep a `SMS_TEST_OTP` entry alongside a real provider temporarily
 (e.g. for app-store review accounts) — matching numbers use the fixed code,
 everyone else gets a real SMS. Remove it when you don't need it.
 
+## 10b. Push notifications (instant locate) — optional
+
+Push makes a manager's "locate now" resolve in ~3-5s instead of ~30s, by
+waking the worker's phone to grab a fresh fix on demand. Without it, locate
+still works via the app's 30s sync poll — so this is an accelerator, not a
+requirement.
+
+Two parts: the **push-worker** (already in the stack) and a one-time **Firebase
+(FCM)** setup so Android standalone builds can receive pushes.
+
+**The push-worker** ships in `docker-compose.yml`; `docker compose up -d`
+builds and starts it. It needs no keys — it reads the push queue from Postgres
+and sends via Expo's push service. Check it: `docker compose logs -f push-worker`
+(→ "listening on push_wake").
+
+**Firebase / FCM (one-time, ~15 min, done on your workstation with the Expo CLI):**
+
+1. Create a Firebase project at console.firebase.google.com (free). Add an
+   **Android app** with package name `ie.timetable.app`.
+2. Firebase → Project settings → **Service accounts** → **Generate new private
+   key** → download the JSON.
+3. Upload it to your EAS project so Expo can deliver to your app:
+   ```powershell
+   cd app
+   eas credentials
+   # → Android → production (and preview) → Google Service Account →
+   #   "Manage your Google Service Account Key for Push Notifications (FCM V1)"
+   #   → upload the JSON from step 2
+   ```
+4. Rebuild the app (`eas build -p android --profile preview`) and reinstall.
+   The app registers its push token on next sign-in.
+
+Verify end-to-end: worker clocks in on the rebuilt app → manager taps
+**locate now** → the worker's position updates within a few seconds.
+
+iOS push additionally needs the paid Apple Developer account + APNs key (EAS
+prompts for it during `eas build -p ios`). Android is the priority.
+
 ## 11. Day-2 operations
 
 * **Logs:** `docker compose logs -f auth` (or any service name).

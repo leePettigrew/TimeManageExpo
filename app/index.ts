@@ -1,8 +1,9 @@
 import { registerRootComponent } from 'expo';
 
-// The breadcrumb TaskManager task must be defined at module load, before the
-// background runtime can invoke it — keep this import first.
+// TaskManager tasks must be defined at module load, before the background
+// runtime can invoke them — keep these imports first.
 import './src/lib/breadcrumbs';
+import './src/lib/push';
 
 import App from './App';
 

@@ -359,5 +359,19 @@ services:
         "log_min_messages=fatal" # prevents Realtime polling queries from appearing in logs
       ]
 
+  # Sends Expo push notifications for the push_outbox queue (instant locate).
+  # No FCM key here — Expo's push service delivers; FCM creds live in EAS.
+  # Only needs a Postgres connection. Optional: the app degrades to the 30s
+  # sync poll if this isn't running.
+  push-worker:
+    container_name: supabase-push-worker
+    build: ./push-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
+
 volumes:
   db-config:
