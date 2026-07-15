@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1045261750285",
+    "project_id": "timetable-d4c37",
+    "storage_bucket": "timetable-d4c37.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1045261750285:android:bf0c0ab33b2debeb930544",
+        "android_client_info": {
+          "package_name": "ie.timetable.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA74cedbetDfQbSvH8Tsnh4viCW7NWvuTk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
