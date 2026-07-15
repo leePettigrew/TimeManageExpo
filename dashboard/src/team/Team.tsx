@@ -98,15 +98,33 @@ export function Team({ profile }: { profile: Profile }) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['invites'] }),
   });
 
+  const [intervalMsg, setIntervalMsg] = useState<{ id: string; text: string; ok: boolean } | null>(null);
   const setInterval_ = useMutation({
     mutationFn: async (vars: { id: string; seconds: number }) => {
-      const { error: err } = await supabase
+      const { data, error: err } = await supabase
         .from('profiles')
         .update({ ping_interval_s: vars.seconds })
-        .eq('id', vars.id);
+        .eq('id', vars.id)
+        .select('id');
       if (err) throw err;
+      // RLS can silently match zero rows — treat that as a failure to save
+      if (!data || data.length === 0) {
+        throw new Error('Not saved — you may not have permission, or the update didn’t apply.');
+      }
+      return vars;
     },
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['team'] }),
+    onSuccess: (vars) => {
+      setIntervalMsg({ id: vars.id, text: 'Saved ✓', ok: true });
+      setTimeout(() => setIntervalMsg(null), 2500);
+      void qc.invalidateQueries({ queryKey: ['team'] });
+    },
+    onError: (e, vars) => {
+      const raw = e instanceof Error ? e.message : String(e);
+      const text = /column .*ping_interval_s|does not exist/i.test(raw)
+        ? 'Server not updated — run apply-migrations.sh on the server.'
+        : raw;
+      setIntervalMsg({ id: vars.id, text, ok: false });
+    },
   });
 
   return (
@@ -187,7 +205,7 @@ export function Team({ profile }: { profile: Profile }) {
               <td>{m.role}</td>
               <td>
                 <select
-                  value={m.ping_interval_s}
+                  value={m.ping_interval_s ?? 90}
                   title="How often this phone records a location while clocked in. Applies from the next sync; faster settings use more battery."
                   onChange={(e) => setInterval_.mutate({ id: m.id, seconds: Number(e.target.value) })}
                 >
@@ -196,10 +214,18 @@ export function Team({ profile }: { profile: Profile }) {
                       {o.label}
                     </option>
                   ))}
-                  {!PING_INTERVALS.some((o) => o.value === m.ping_interval_s) && (
+                  {m.ping_interval_s != null && !PING_INTERVALS.some((o) => o.value === m.ping_interval_s) && (
                     <option value={m.ping_interval_s}>{m.ping_interval_s}s</option>
                   )}
                 </select>
+                {intervalMsg?.id === m.id && (
+                  <div
+                    className="small"
+                    style={{ color: intervalMsg.ok ? 'var(--primary)' : 'var(--danger)', marginTop: 4 }}
+                  >
+                    {intervalMsg.text}
+                  </div>
+                )}
               </td>
               <td>{m.is_active ? 'active' : 'deactivated'}</td>
               <td>
