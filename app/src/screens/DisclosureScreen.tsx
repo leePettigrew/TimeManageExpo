@@ -26,7 +26,7 @@ export function DisclosureScreen() {
   };
 
   return (
-    <Screen title="How this app uses your location">
+    <Screen title="Your location, plainly">
       <ScrollView style={styles.scroll} contentContainerStyle={{ gap: spacing(2) }}>
         <Text style={styles.body}>
           This app collects location data <Text style={styles.strong}>only between clock-in and
@@ -51,7 +51,7 @@ export function DisclosureScreen() {
         </Text>
       </ScrollView>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Button title="I understand" onPress={accept} loading={busy} />
+      <Button title="I understand" icon="checkmark-outline" onPress={accept} loading={busy} />
     </Screen>
   );
 }

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Text, View, StyleSheet, Alert, Platform, Linking } from 'react-native';
+import { Text, View, StyleSheet, Alert, Platform, Linking, Pressable, ScrollView } from 'react-native';
 import * as Device from 'expo-device';
-import { Screen } from '../ui/Screen';
+import { Ionicons } from '@expo/vector-icons';
+import { Screen, Card, Chip } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import { colors, spacing } from '../ui/theme';
 import { useSession } from '../state/session';
@@ -10,6 +11,7 @@ import { flush, onSyncStatus, SyncStatus } from '../lib/sync';
 import { pendingCounts, kvGet } from '../lib/outbox';
 import { supabase } from '../lib/supabase';
 import { TeamScreen } from './TeamScreen';
+import { HoursScreen } from './HoursScreen';
 
 function batteryAdvice(): string {
   const brand = (Device.manufacturer ?? '').toLowerCase();
@@ -36,7 +38,7 @@ export function HomeScreen() {
   const { profile, signOut } = useSession();
   const [shift, setShift] = useState<LocalShift | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showTeam, setShowTeam] = useState(false);
+  const [view, setView] = useState<'home' | 'team' | 'hours'>('home');
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [pending, setPending] = useState({ events: 0, pings: 0 });
   const [trail, setTrail] = useState<string>('off');
@@ -106,105 +108,139 @@ export function HomeScreen() {
     ]);
   };
 
+  if (view === 'team') return <TeamScreen onBack={() => setView('home')} />;
+  if (view === 'hours') return <HoursScreen onBack={() => setView('home')} />;
+
   const offline = sync?.lastResult === 'offline';
   const queued = pending.events + pending.pings;
-
-  if (showTeam) {
-    return <TeamScreen onBack={() => setShowTeam(false)} />;
-  }
+  const firstName = (profile?.full_name || 'there').split(/\s+/)[0];
+  const today = new Date().toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
     <Screen>
-      <Text style={styles.greeting}>{profile?.full_name || 'Worker'}</Text>
-
-      <View style={[styles.card, shift ? styles.cardActive : null]}>
-        <Text style={styles.cardLabel}>{shift ? 'CLOCKED IN' : 'OFF THE CLOCK'}</Text>
-        {shift ? (
-          <>
-            <Text style={styles.duration}>{fmtDuration(shift.startedAt)}</Text>
-            <Text style={styles.since}>
-              since{' '}
-              {new Date(shift.startedAt).toLocaleTimeString('en-IE', {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </Text>
-            {trail === 'on' ? (
-              <Text style={styles.trackNote}>Location tracking is ON while clocked in</Text>
-            ) : (
-              <Text style={styles.trackWarn}>
-                Route tracking is off ({trail === 'denied' ? 'permission needed' : 'unavailable'}) —
-                only clock times are recorded
-              </Text>
-            )}
-          </>
-        ) : (
-          <Text style={styles.since}>Location tracking is OFF</Text>
-        )}
+      <View style={styles.headerRow}>
+        <View>
+          <Text style={styles.greeting}>Hi, {firstName}</Text>
+          <Text style={styles.date}>{today}</Text>
+        </View>
+        {offline ? <Chip label="offline" tone="warn" icon="cloud-offline-outline" /> : null}
       </View>
 
-      {shift && trail === 'denied' ? (
-        <Button
-          title="Enable location permission"
-          onPress={() => void Linking.openSettings()}
-          variant="ghost"
-        />
-      ) : null}
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <Card active={!!shift}>
+          <View style={styles.statusHead}>
+            <Chip
+              label={shift ? 'ON THE CLOCK' : 'OFF THE CLOCK'}
+              tone={shift ? 'ok' : 'dim'}
+              icon={shift ? 'time' : 'time-outline'}
+            />
+            {shift && trail === 'on' ? <Chip label="tracking" tone="ok" icon="navigate" /> : null}
+            {shift && trail !== 'on' ? <Chip label="route off" tone="warn" icon="navigate-outline" /> : null}
+          </View>
+          {shift ? (
+            <>
+              <Text style={styles.duration}>{fmtDuration(shift.startedAt)}</Text>
+              <Text style={styles.since}>
+                since{' '}
+                {new Date(shift.startedAt).toLocaleTimeString('en-IE', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.restingNote}>Location tracking is off. Enjoy the quiet.</Text>
+          )}
+        </Card>
 
-      {shift && Platform.OS === 'android' ? (
-        <View>
-          <Text style={styles.helpLink} onPress={() => setShowBatteryHelp((v) => !v)}>
-            {showBatteryHelp ? '▾' : '▸'} Tracking stops by itself? Phone battery settings
-          </Text>
-          {showBatteryHelp ? (
-            <View style={styles.helpBox}>
-              <Text style={styles.helpText}>{batteryAdvice()}</Text>
-              <Button
-                title="Open app settings"
-                onPress={() => void Linking.openSettings()}
-                variant="ghost"
-              />
-            </View>
+        {shift ? (
+          <Button title="Clock out" icon="log-out-outline" onPress={doClockOut} variant="danger" loading={busy} />
+        ) : (
+          <Button title="Clock in" icon="log-in-outline" onPress={doClockIn} loading={busy} />
+        )}
+
+        <View style={styles.chipRow}>
+          {queued > 0 ? (
+            <Chip label={`${queued} waiting to send`} tone="info" icon="cloud-upload-outline" />
+          ) : sync?.lastSyncAt ? (
+            <Chip
+              label={`up to date · ${sync.lastSyncAt.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' })}`}
+              tone="dim"
+              icon="checkmark-circle-outline"
+            />
+          ) : null}
+          {locationChecks > 0 ? (
+            <Chip label={`location checked ${locationChecks}× today`} tone="info" icon="locate-outline" />
           ) : null}
         </View>
-      ) : null}
 
-      {shift ? (
-        <Button title="Clock out" onPress={doClockOut} variant="danger" loading={busy} />
-      ) : (
-        <Button title="Clock in" onPress={doClockIn} loading={busy} />
-      )}
-
-      <View style={styles.statusRow}>
-        {locationChecks > 0 ? (
-          <Text style={styles.badgeInfo}>
-            📍 Your manager checked your location {locationChecks}× today
-          </Text>
-        ) : null}
-        {offline ? <Text style={styles.badgeWarn}>⚠ No signal — saving on phone</Text> : null}
         {queued > 0 ? (
-          <Text style={styles.badgeInfo}>
-            {queued} item{queued === 1 ? '' : 's'} waiting to send
-          </Text>
-        ) : sync?.lastSyncAt ? (
-          <Text style={styles.badgeOk}>
-            ✓ Up to date{' '}
-            {sync.lastSyncAt.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' })}
-          </Text>
+          <Button title="Send now" icon="paper-plane-outline" onPress={() => void flush()} variant="subtle" />
         ) : null}
-      </View>
 
-      {queued > 0 ? (
-        <Button title="Send now" onPress={() => void flush()} variant="ghost" />
-      ) : null}
+        {shift && trail === 'denied' ? (
+          <Button
+            title="Enable location permission"
+            icon="settings-outline"
+            onPress={() => void Linking.openSettings()}
+            variant="subtle"
+          />
+        ) : null}
+
+        {shift && Platform.OS === 'android' ? (
+          <View style={styles.helpBlock}>
+            <Pressable style={styles.helpToggle} onPress={() => setShowBatteryHelp((v) => !v)}>
+              <Ionicons
+                name={showBatteryHelp ? 'chevron-down' : 'chevron-forward'}
+                size={16}
+                color={colors.info}
+              />
+              <Text style={styles.helpLink}>Tracking stops by itself? Phone battery settings</Text>
+            </Pressable>
+            {showBatteryHelp ? (
+              <View style={styles.helpBox}>
+                <Text style={styles.helpText}>{batteryAdvice()}</Text>
+                <Button
+                  title="Open app settings"
+                  icon="settings-outline"
+                  onPress={() => void Linking.openSettings()}
+                  variant="ghost"
+                />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+      </ScrollView>
 
       <View style={styles.footer}>
+        <FooterAction icon="stopwatch-outline" label="My hours" onPress={() => setView('hours')} />
         {profile?.role === 'manager' ? (
-          <Button title="Team" onPress={() => setShowTeam(true)} variant="ghost" style={{ marginBottom: 8 }} />
+          <FooterAction icon="people-outline" label="Team" onPress={() => setView('team')} />
         ) : null}
-        <Button title="Sign out" onPress={() => confirmSignOut(signOut, queued)} variant="ghost" />
+        <FooterAction
+          icon="exit-outline"
+          label="Sign out"
+          onPress={() => confirmSignOut(signOut, queued)}
+        />
       </View>
     </Screen>
+  );
+}
+
+function FooterAction({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={({ pressed }) => [styles.footerBtn, pressed && { opacity: 0.7 }]} onPress={onPress}>
+      <Ionicons name={icon} size={22} color={colors.textDim} />
+      <Text style={styles.footerLabel}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -222,28 +258,27 @@ function confirmSignOut(signOut: () => Promise<void>, queued: number) {
 }
 
 const styles = StyleSheet.create({
-  greeting: { color: colors.textDim, fontSize: 18 },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing(3),
-    alignItems: 'center',
-    gap: spacing(1),
-  },
-  cardActive: { borderColor: colors.primary },
-  cardLabel: { color: colors.textDim, fontSize: 14, fontWeight: '700', letterSpacing: 2 },
-  duration: { color: colors.text, fontSize: 48, fontWeight: '800' },
-  since: { color: colors.textDim, fontSize: 16 },
-  trackNote: { color: colors.primary, fontSize: 14, fontWeight: '600' },
-  trackWarn: { color: colors.warn, fontSize: 14, fontWeight: '600', textAlign: 'center' },
-  helpLink: { color: colors.info, fontSize: 15, paddingVertical: 4 },
-  helpBox: { gap: 8, paddingTop: 4 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  greeting: { color: colors.text, fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
+  date: { color: colors.textDim, fontSize: 14, marginTop: 2 },
+  scroll: { gap: spacing(2), paddingBottom: spacing(2) },
+  statusHead: { flexDirection: 'row', gap: spacing(1), marginBottom: spacing(1.5), flexWrap: 'wrap' },
+  duration: { color: colors.text, fontSize: 54, fontWeight: '800', letterSpacing: -1.5 },
+  since: { color: colors.textDim, fontSize: 15, marginTop: 2 },
+  restingNote: { color: colors.textDim, fontSize: 15, marginTop: spacing(0.5) },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing(1) },
+  helpBlock: { gap: spacing(1) },
+  helpToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
+  helpLink: { color: colors.info, fontSize: 14, fontWeight: '600' },
+  helpBox: { gap: spacing(1) },
   helpText: { color: colors.textDim, fontSize: 14, lineHeight: 20 },
-  statusRow: { alignItems: 'center', gap: spacing(1) },
-  badgeWarn: { color: colors.warn, fontSize: 15, fontWeight: '600' },
-  badgeInfo: { color: colors.info, fontSize: 15 },
-  badgeOk: { color: colors.textDim, fontSize: 14 },
-  footer: { flex: 1, justifyContent: 'flex-end' },
+  footer: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing(1.5),
+    justifyContent: 'space-around',
+  },
+  footerBtn: { alignItems: 'center', gap: 3, minWidth: 84 },
+  footerLabel: { color: colors.textDim, fontSize: 12, fontWeight: '600' },
 });

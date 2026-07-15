@@ -6,6 +6,13 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B1220",
+    "updates": {
+      "url": "https://u.expo.dev/48a1e50a-ab94-4019-a1ad-818a56dd610f"
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "ie.timetable.app",
@@ -20,7 +27,7 @@
     "android": {
       "package": "ie.timetable.app",
       "adaptiveIcon": {
-        "backgroundColor": "#0f172a",
+        "backgroundColor": "#0B1220",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -44,6 +51,15 @@
           "locationAlwaysAndWhenInUsePermission": "Your location is recorded only between clock-in and clock-out so your employer can verify hours on site, even when the app is in the background. Tracking stops completely when you clock out.",
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#0B1220"
         }
       ]
     ],

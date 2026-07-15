@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import type { TimesheetDaily, TimesheetWeekly, ShiftEffective } from '../lib/types';
 import { downloadCsv, fmtDate, fmtHours, fmtTime } from '../lib/format';
 import { FLAG_LABELS } from '../lib/types';
+import { ShiftReplay } from './ShiftReplay';
 
 function isoWeekOf(d: Date): { year: number; week: number } {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -29,6 +30,7 @@ function shiftWeek(year: number, week: number, delta: number): { year: number; w
 export function Timesheets() {
   const [{ year, week }, setWeek] = useState(() => isoWeekOf(new Date()));
   const [drill, setDrill] = useState<string | null>(null); // worker_id
+  const [replay, setReplay] = useState<ShiftEffective | null>(null);
 
   const weekly = useQuery({
     queryKey: ['timesheet-weekly', year, week],
@@ -76,6 +78,7 @@ export function Timesheets() {
 
   const rows = weekly.data ?? [];
   const totalSeconds = rows.reduce((acc, r) => acc + (r.worked_seconds ?? 0), 0);
+  const totalFlagged = rows.reduce((acc, r) => acc + r.flagged_shifts, 0);
 
   const exportCsv = () => {
     downloadCsv(
@@ -106,10 +109,24 @@ export function Timesheets() {
           ▶
         </button>
         <span className="spacer" />
-        <span className="dim">Team total: {fmtHours(totalSeconds)}</span>
         <button onClick={exportCsv} disabled={rows.length === 0}>
           Export CSV
         </button>
+      </div>
+
+      <div className="stat-row">
+        <div className="stat">
+          <div className="k">Team hours this week</div>
+          <div className="v green">{fmtHours(totalSeconds)}</div>
+        </div>
+        <div className="stat">
+          <div className="k">People worked</div>
+          <div className="v">{rows.length}</div>
+        </div>
+        <div className="stat">
+          <div className="k">Shifts flagged</div>
+          <div className={`v ${totalFlagged > 0 ? 'amber' : ''}`}>{totalFlagged}</div>
+        </div>
       </div>
 
       <table>
@@ -183,6 +200,7 @@ export function Timesheets() {
                 <th>Hours</th>
                 <th>Status</th>
                 <th>Flags</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -205,12 +223,19 @@ export function Timesheets() {
                           </span>
                         ))}
                   </td>
+                  <td>
+                    <button className="ghost small" onClick={() => setReplay(s)}>
+                      Replay route
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {replay && <ShiftReplay shift={replay} onClose={() => setReplay(null)} />}
     </div>
   );
 }

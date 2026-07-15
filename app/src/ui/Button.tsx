@@ -1,34 +1,49 @@
 import React from 'react';
-import { Pressable, Text, StyleSheet, ActivityIndicator, ViewStyle } from 'react-native';
-import { colors, spacing } from './theme';
+import { Pressable, Text, StyleSheet, ActivityIndicator, ViewStyle, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, spacing } from './theme';
 
 interface Props {
   title: string;
   onPress: () => void;
-  variant?: 'primary' | 'danger' | 'ghost';
+  variant?: 'primary' | 'danger' | 'ghost' | 'subtle';
+  icon?: keyof typeof Ionicons.glyphMap;
   disabled?: boolean;
   loading?: boolean;
   style?: ViewStyle;
 }
 
-export function Button({ title, onPress, variant = 'primary', disabled, loading, style }: Props) {
-  const bg =
-    variant === 'primary' ? colors.primary : variant === 'danger' ? colors.danger : 'transparent';
+export function Button({ title, onPress, variant = 'primary', icon, disabled, loading, style }: Props) {
+  const palette = {
+    primary: { bg: colors.primary, fg: colors.onPrimary, border: 'transparent' },
+    danger: { bg: colors.danger, fg: '#2A0808', border: 'transparent' },
+    ghost: { bg: 'transparent', fg: colors.text, border: colors.border },
+    subtle: { bg: colors.card, fg: colors.text, border: colors.border },
+  }[variant];
+
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled || loading}
       style={({ pressed }) => [
         styles.base,
-        { backgroundColor: bg, opacity: disabled || loading ? 0.5 : pressed ? 0.8 : 1 },
-        variant === 'ghost' && { borderWidth: 1, borderColor: colors.border },
+        {
+          backgroundColor: palette.bg,
+          borderColor: palette.border,
+          borderWidth: palette.border === 'transparent' ? 0 : 1,
+          opacity: disabled || loading ? 0.45 : 1,
+          transform: [{ scale: pressed ? 0.98 : 1 }],
+        },
         style,
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'ghost' ? colors.text : '#06210f'} />
+        <ActivityIndicator color={palette.fg} />
       ) : (
-        <Text style={[styles.label, variant === 'ghost' && { color: colors.text }]}>{title}</Text>
+        <View style={styles.row}>
+          {icon ? <Ionicons name={icon} size={20} color={palette.fg} /> : null}
+          <Text style={[styles.label, { color: palette.fg }]}>{title}</Text>
+        </View>
       )}
     </Pressable>
   );
@@ -36,15 +51,12 @@ export function Button({ title, onPress, variant = 'primary', disabled, loading,
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: 56,
-    borderRadius: 14,
+    minHeight: 58,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing(3),
   },
-  label: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#06210f',
-  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  label: { fontSize: 17, fontWeight: '700' },
 });

@@ -61,7 +61,7 @@ export function TeamScreen({ onBack }: { onBack: () => void }) {
   };
 
   return (
-    <Screen title="Team">
+    <Screen title="Team" onBack={onBack}>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <FlatList
         data={shifts}
@@ -94,7 +94,6 @@ export function TeamScreen({ onBack }: { onBack: () => void }) {
           );
         }}
       />
-      <Button title="Back" onPress={onBack} variant="ghost" />
     </Screen>
   );
 }

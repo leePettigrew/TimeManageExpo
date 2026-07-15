@@ -2,6 +2,7 @@ import 'react-native-get-random-values';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Updates from 'expo-updates';
 import { SessionProvider, useSession } from './src/state/session';
 import { PhoneLoginScreen } from './src/screens/PhoneLoginScreen';
 import { OtpScreen } from './src/screens/OtpScreen';
@@ -51,7 +52,27 @@ function Router() {
   }
 }
 
+// Check for an over-the-air update on launch and apply it silently next time.
+// Wrapped so a failure (offline, dev build) never blocks the app.
+function useOtaUpdates() {
+  useEffect(() => {
+    if (__DEV__) return;
+    (async () => {
+      try {
+        const result = await Updates.checkForUpdateAsync();
+        if (result.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          // applied on next cold start — never interrupt a worker mid-shift
+        }
+      } catch {
+        /* offline or no update server — ignore */
+      }
+    })();
+  }, []);
+}
+
 export default function App() {
+  useOtaUpdates();
   return (
     <SessionProvider>
       <StatusBar style="light" />

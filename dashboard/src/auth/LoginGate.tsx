@@ -90,7 +90,21 @@ export function LoginGate({ children }: { children: (profile: Profile) => ReactN
   return (
     <div className="center-page">
       <div className="auth-card">
-        <h1>TimeTable</h1>
+        <h1>
+          <svg className="auth-mark" viewBox="0 0 64 64">
+            <rect width="64" height="64" rx="14" fill="#0B1220" />
+            <circle cx="32" cy="32" r="20" fill="none" stroke="#4ADE80" strokeWidth="4.5" />
+            <polyline
+              points="23,33 29,39 42,25"
+              fill="none"
+              stroke="#F2F6FC"
+              strokeWidth="5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          TimeTable
+        </h1>
         <p className="dim">Manager dashboard</p>
 
         {phase === 'phone' && (

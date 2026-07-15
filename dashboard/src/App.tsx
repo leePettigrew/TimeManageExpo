@@ -19,7 +19,22 @@ function Shell({ profile }: { profile: Profile }) {
   return (
     <div className="shell">
       <header>
-        <span className="brand">TimeTable</span>
+        <span className="brand">
+          <span className="brand-mark">
+            <svg width="18" height="18" viewBox="0 0 64 64">
+              <circle cx="32" cy="32" r="20" fill="none" stroke="#4ADE80" strokeWidth="5" />
+              <polyline
+                points="23,33 29,39 42,25"
+                fill="none"
+                stroke="#F2F6FC"
+                strokeWidth="5.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          TimeTable
+        </span>
         <nav>
           {(
             [
