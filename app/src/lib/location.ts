@@ -48,6 +48,31 @@ export async function getFix(timeoutMs = 12_000): Promise<Fix | null> {
   }
 }
 
+/**
+ * A fix suitable for BACKGROUND use (e.g. answering a locate push). A one-shot
+ * getCurrentPositionAsync typically never resolves while the app is
+ * backgrounded, so prefer the OS's last-known position (which returns
+ * immediately, backgrounded or not) and only fall back to a live request.
+ */
+export async function getBackgroundFix(maxAgeMs = 120_000): Promise<Fix | null> {
+  try {
+    const last = await Location.getLastKnownPositionAsync({ maxAge: maxAgeMs });
+    if (last) {
+      return {
+        lat: last.coords.latitude,
+        lng: last.coords.longitude,
+        accuracyM: last.coords.accuracy ?? null,
+        mocked: last.mocked ?? false,
+        batteryPct: await batteryPct(),
+        deviceAt: new Date(last.timestamp),
+      };
+    }
+  } catch {
+    /* fall through to a live request */
+  }
+  return getFix(10_000);
+}
+
 export async function batteryPct(): Promise<number | null> {
   try {
     const level = await Battery.getBatteryLevelAsync();

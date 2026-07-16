@@ -30,6 +30,7 @@ interface Diag {
   queuedPings: number;
   lastSyncAt: string | null;
   lastTaskTick: string | null;
+  lastPushTick: string | null;
 }
 
 function ago(iso: string | null): string {
@@ -67,6 +68,7 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
       queuedPings: counts.pings,
       lastSyncAt: await kvGet('last_sync_at'),
       lastTaskTick: await kvGet('last_task_tick'),
+      lastPushTick: await kvGet('last_push_tick'),
     });
   }, []);
 
@@ -134,9 +136,12 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
             <Row label="Last accuracy" value={`±${Math.round(d.lastAccuracy)}m`} />
           ) : null}
           <Row label="Last background tick" value={ago(d?.lastTaskTick ?? null)} />
+          <Row label="Last locate-push tick" value={ago(d?.lastPushTick ?? null)} />
           <Text style={styles.hint}>
             Lock the phone, wait 2 min, reopen — &quot;Last background tick&quot; should be recent.
-            If it stays old, the OS is blocking the background task.
+            Then press locate from the dashboard while locked; &quot;Last locate-push tick&quot;
+            should update within seconds. If either stays old, the OS isn&apos;t running that
+            background task.
           </Text>
         </Card>
 

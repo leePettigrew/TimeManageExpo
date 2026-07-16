@@ -22,7 +22,7 @@ import {
   kvGet,
   kvSet,
 } from './outbox';
-import { getFix } from './location';
+import { getBackgroundFix } from './location';
 import { uuidv7 } from './ids';
 
 export interface SyncStatus {
@@ -279,7 +279,9 @@ async function refreshLocationControls(): Promise<void> {
     if (!rawShift) return; // no shift: nothing to answer (server shouldn't allow this state)
     const { clockEventId } = JSON.parse(rawShift) as { clockEventId: string };
 
-    const fix = await getFix(15_000);
+    // prefer last-known (works backgrounded); getBackgroundFix falls back to a
+    // live fix itself when foregrounded
+    const fix = await getBackgroundFix();
     if (!fix) return; // no GPS right now; the next breadcrumb answers it instead
     await insertPings([
       {

@@ -50,24 +50,33 @@ TaskManager.defineTask(BREADCRUMB_TASK, async ({ data, error }) => {
   const fresh = locations.filter((loc) => loc.timestamp >= shiftStartMs);
   if (fresh.length === 0) return;
 
-  const battery = await batteryPct();
-  let seq = await nextPingSeq(clockEventId);
-  const points: NewPing[] = fresh.map((loc) => ({
-    id: uuidv7(),
-    clockEventId,
-    seq: seq++,
-    deviceAt: new Date(loc.timestamp),
-    lat: loc.coords.latitude,
-    lng: loc.coords.longitude,
-    accuracyM: loc.coords.accuracy ?? null,
-    speedMps: loc.coords.speed ?? null,
-    mocked: loc.mocked ?? false,
-    batteryPct: battery,
-  }));
-  await insertPings(points);
+  // Capture-first: persist points to SQLite BEFORE any network/interval work,
+  // and guard the tail so a bridgeless-teardown mid-callback can't lose points
+  // that were already gathered. Worst case they capture locally and flush when
+  // the app next foregrounds.
+  try {
+    const battery = await batteryPct();
+    let seq = await nextPingSeq(clockEventId);
+    const points: NewPing[] = fresh.map((loc) => ({
+      id: uuidv7(),
+      clockEventId,
+      seq: seq++,
+      deviceAt: new Date(loc.timestamp),
+      lat: loc.coords.latitude,
+      lng: loc.coords.longitude,
+      accuracyM: loc.coords.accuracy ?? null,
+      speedMps: loc.coords.speed ?? null,
+      mocked: loc.mocked ?? false,
+      batteryPct: battery,
+    }));
+    await insertPings(points);
+    await kvSet('last_capture_tick', new Date().toISOString()).catch(() => {});
 
-  // manager may have changed the ping cadence since the task started
-  await applyIntervalSetting();
+    // manager may have changed the ping cadence since the task started
+    await applyIntervalSetting();
+  } catch {
+    /* points already inserted or unrecoverable — never throw from the task */
+  }
 
   // opportunistic near-real-time sync; harmless offline (flush backs off)
   void flush();
