@@ -29,6 +29,7 @@ interface Diag {
   queuedEvents: number;
   queuedPings: number;
   lastSyncAt: string | null;
+  lastTaskTick: string | null;
 }
 
 function ago(iso: string | null): string {
@@ -65,6 +66,7 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
       queuedEvents: counts.events,
       queuedPings: counts.pings,
       lastSyncAt: await kvGet('last_sync_at'),
+      lastTaskTick: await kvGet('last_task_tick'),
     });
   }, []);
 
@@ -131,6 +133,11 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
           {d?.lastAccuracy != null ? (
             <Row label="Last accuracy" value={`±${Math.round(d.lastAccuracy)}m`} />
           ) : null}
+          <Row label="Last background tick" value={ago(d?.lastTaskTick ?? null)} />
+          <Text style={styles.hint}>
+            Lock the phone, wait 2 min, reopen — &quot;Last background tick&quot; should be recent.
+            If it stays old, the OS is blocking the background task.
+          </Text>
         </Card>
 
         <Card>
@@ -183,6 +190,7 @@ function Row({
 
 const styles = StyleSheet.create({
   section: { color: colors.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 2, marginBottom: spacing(1) },
+  hint: { color: colors.textFaint, fontSize: 12, lineHeight: 17, marginTop: spacing(1) },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 },
   rowLabel: { color: colors.textDim, fontSize: 15, flex: 1 },
   rowValue: { color: colors.text, fontSize: 15, fontWeight: '700' },

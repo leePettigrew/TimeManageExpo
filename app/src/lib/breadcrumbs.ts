@@ -20,7 +20,15 @@ interface TaskData {
 }
 
 TaskManager.defineTask(BREADCRUMB_TASK, async ({ data, error }) => {
-  if (error || !data) return;
+  // Heartbeat: record every time the OS invokes this task, even on error/empty.
+  // The diagnostics screen shows this so we can SEE the background task firing
+  // (or not) while the app is backgrounded.
+  await kvSet('last_task_tick', new Date().toISOString()).catch(() => {});
+  if (error) {
+    await kvSet('last_task_error', String(error.message ?? error)).catch(() => {});
+    return;
+  }
+  if (!data) return;
   const { locations } = data as TaskData;
   if (!locations?.length) return;
 
@@ -98,21 +106,18 @@ export async function startBreadcrumbs(): Promise<BreadcrumbState> {
 
 async function startTaskWithInterval(intervalS: number): Promise<BreadcrumbState> {
   const fast = intervalS < 60; // sub-minute = high-resolution mode
-  // Delivery latency (how soon a captured point reaches the server/map). The
-  // GPS chip is the battery cost, not the JS wake-up, so delivering promptly
-  // is cheap once tracking is already on: 15s for fast modes, 60s otherwise —
-  // so the live board never lags more than ~1 min behind a moving worker.
-  const deferredMs = fast ? 15_000 : 60_000;
-  // distanceInterval is a movement gate. Fast modes: 0 (report even when
-  // standing still — true real-time). Normal modes: 20 m — enough to suppress
-  // GPS jitter while parked, small enough that a moving worker still updates.
-  const distanceInterval = fast ? 0 : 20;
-
+  // IMPORTANT: do NOT set deferredUpdatesInterval. On Android it batches
+  // locations and holds them — often until the app returns to the foreground —
+  // which manifests as "only works when focused" (expo/expo #13700, #9200).
+  // We want each fix delivered immediately, backgrounded or not.
+  //
+  // distanceInterval = 0 so a fix arrives every timeInterval even when the
+  // worker is standing still (a stationary phone with a movement gate emits
+  // nothing). Slightly more points; guarantees a reliable background heartbeat.
   await Location.startLocationUpdatesAsync(BREADCRUMB_TASK, {
     accuracy: fast ? Location.Accuracy.High : Location.Accuracy.Balanced,
-    timeInterval: intervalS * 1000, // Android: ping cadence while moving
-    distanceInterval,
-    deferredUpdatesInterval: deferredMs,
+    timeInterval: intervalS * 1000, // ping cadence
+    distanceInterval: 0,            // time-driven, works when stationary
     pausesUpdatesAutomatically: false, // iOS may otherwise pause and never resume
     activityType: Location.ActivityType.Other,
     showsBackgroundLocationIndicator: true,
