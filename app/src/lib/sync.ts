@@ -247,14 +247,23 @@ async function refreshLocationControls(): Promise<void> {
     const uid = session.session?.user.id;
     if (!uid) return;
 
-    // cache the manager-set cadence; the breadcrumb task applies it
+    // cache the manager-set cadence AND apply it now. Applying here (on every
+    // sync) rather than only inside the background task means an interval
+    // change takes effect within ~30s even if the background task isn't
+    // firing — no re-clock needed.
     const { data: profile } = await supabase
       .from('profiles')
       .select('ping_interval_s')
       .eq('id', uid)
       .maybeSingle();
     if (profile?.ping_interval_s) {
+      const prev = await kvGet('ping_interval_s');
       await kvSet('ping_interval_s', String(profile.ping_interval_s));
+      if (prev !== String(profile.ping_interval_s)) {
+        // dynamic import avoids a static circular dependency (breadcrumbs ↔ sync)
+        const { applyIntervalSetting } = await import('./breadcrumbs');
+        await applyIntervalSetting();
+      }
     }
 
     // pending "where are you now?" → take one immediate fix and queue it;
