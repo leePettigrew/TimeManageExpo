@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Text, View, StyleSheet, Alert, Platform, Linking, Pressable, ScrollView } from 'react-native';
+import { Text, View, StyleSheet, Alert, Platform, Pressable, ScrollView } from 'react-native';
 import * as Device from 'expo-device';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, Card, Chip } from '../ui/Screen';
@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase';
 import { TeamScreen } from './TeamScreen';
 import { HoursScreen } from './HoursScreen';
 import { DiagnosticsScreen } from './DiagnosticsScreen';
+import { LocationHelpScreen } from './LocationHelpScreen';
 import { requestIgnoreBatteryOptimizations, openAppSettings } from '../lib/batteryReliability';
 
 function batteryAdvice(): string {
@@ -40,7 +41,7 @@ export function HomeScreen() {
   const { profile, signOut } = useSession();
   const [shift, setShift] = useState<LocalShift | null>(null);
   const [busy, setBusy] = useState(false);
-  const [view, setView] = useState<'home' | 'team' | 'hours' | 'diag'>('home');
+  const [view, setView] = useState<'home' | 'team' | 'hours' | 'diag' | 'locHelp'>('home');
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [pending, setPending] = useState({ events: 0, pings: 0 });
   const [trail, setTrail] = useState<string>('off');
@@ -113,6 +114,15 @@ export function HomeScreen() {
   if (view === 'team') return <TeamScreen onBack={() => setView('home')} />;
   if (view === 'hours') return <HoursScreen onBack={() => setView('home')} />;
   if (view === 'diag') return <DiagnosticsScreen onBack={() => setView('home')} />;
+  if (view === 'locHelp')
+    return (
+      <LocationHelpScreen
+        onBack={() => {
+          setView('home');
+          void refresh();
+        }}
+      />
+    );
 
   const offline = sync?.lastResult === 'offline';
   const queued = pending.events + pending.pings;
@@ -198,12 +208,16 @@ export function HomeScreen() {
         ) : null}
 
         {shift && trail === 'denied' ? (
-          <Button
-            title="Enable location permission"
-            icon="settings-outline"
-            onPress={() => void Linking.openSettings()}
-            variant="subtle"
-          />
+          <View style={styles.locWarnCard}>
+            <View style={styles.locWarnHead}>
+              <Ionicons name="warning-outline" size={20} color={colors.warn} />
+              <Text style={styles.locWarnTitle}>Location isn&apos;t fully on</Text>
+            </View>
+            <Text style={styles.locWarnText}>
+              Your route isn&apos;t being tracked — only your clock times. Fix it in a few taps.
+            </Text>
+            <Button title="Turn on location" icon="navigate-outline" onPress={() => setView('locHelp')} />
+          </View>
         ) : null}
 
         {shift && Platform.OS === 'android' ? (
@@ -301,6 +315,17 @@ const styles = StyleSheet.create({
   helpBox: { gap: spacing(1) },
   helpText: { color: colors.textDim, fontSize: 14, lineHeight: 20 },
   syncNote: { color: colors.textDim, fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  locWarnCard: {
+    backgroundColor: colors.warnDim,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.warn,
+    padding: spacing(2),
+    gap: spacing(1),
+  },
+  locWarnHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  locWarnTitle: { color: colors.warn, fontSize: 16, fontWeight: '700' },
+  locWarnText: { color: colors.text, fontSize: 14, lineHeight: 20 },
   footer: {
     flexDirection: 'row',
     borderTopWidth: 1,

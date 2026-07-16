@@ -66,12 +66,33 @@ export function ShiftReplay({ shift, onClose }: { shift: ShiftEffective; onClose
           source: 'replay',
           filter: ['==', ['geometry-type'], 'Point'],
           paint: {
-            'circle-radius': 4,
+            'circle-radius': 5,
             'circle-color': ['case', ['get', 'mocked'], '#F87171', '#60A5FA'],
             'circle-stroke-width': 1.5,
             'circle-stroke-color': '#0B1220',
           },
         });
+
+        // click a breadcrumb to see the exact time it was recorded
+        m.on('click', 'replay-pts', (e) => {
+          const f = e.features?.[0];
+          if (!f) return;
+          const p = f.properties as { device_at: string; accuracy_m: number | null; seq: number; mocked: boolean };
+          const t = new Date(p.device_at);
+          const when = t.toLocaleString('en-IE', {
+            weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit',
+          });
+          const acc = p.accuracy_m != null ? ` · ±${Math.round(p.accuracy_m)}m` : '';
+          const mock = p.mocked ? '<br/><b style="color:#F87171">⚠ fake GPS suspected</b>' : '';
+          new maplibregl.Popup({ closeButton: false, offset: 8 })
+            .setLngLat((f.geometry as { coordinates: [number, number] }).coordinates)
+            .setHTML(
+              `<div style="font:13px system-ui;color:#0B1220"><b>${when}</b><br/>point #${p.seq}${acc}${mock}</div>`,
+            )
+            .addTo(m);
+        });
+        m.on('mouseenter', 'replay-pts', () => { m.getCanvas().style.cursor = 'pointer'; });
+        m.on('mouseleave', 'replay-pts', () => { m.getCanvas().style.cursor = ''; });
       }
 
       // start/end markers
@@ -133,7 +154,8 @@ export function ShiftReplay({ shift, onClose }: { shift: ShiftEffective; onClose
           </p>
         ) : (
           <p className="dim small">
-            🟢 start · 🔴 end · red dots are suspected fake-GPS points.
+            🟢 start · 🔴 end · red dots are suspected fake-GPS points ·{' '}
+            <b>click any point to see its exact time</b>.
           </p>
         )}
       </div>
@@ -150,7 +172,12 @@ function fc(points: Ping[]) {
       ...points.map((p) => ({
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
-        properties: { mocked: p.mocked },
+        properties: {
+          mocked: p.mocked,
+          device_at: p.device_at,
+          accuracy_m: p.accuracy_m,
+          seq: p.seq,
+        },
       })),
     ],
   };
