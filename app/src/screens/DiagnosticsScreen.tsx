@@ -3,8 +3,9 @@
 // visible on the phone: permissions, whether the background task is alive,
 // points captured this shift, last fix + accuracy, and sync backlog.
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, Alert } from 'react-native';
 import * as Location from 'expo-location';
+import * as Updates from 'expo-updates';
 import { Screen, Card } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import { colors, spacing } from '../ui/theme';
@@ -95,6 +96,26 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
 
   const ok = (b: boolean) => (b ? colors.primary : colors.danger);
 
+  const checkForUpdate = async () => {
+    if (__DEV__) {
+      Alert.alert('Updates', 'Not available in development.');
+      return;
+    }
+    try {
+      const res = await Updates.checkForUpdateAsync();
+      if (!res.isAvailable) {
+        Alert.alert('Up to date', 'You already have the latest version.');
+        return;
+      }
+      await Updates.fetchUpdateAsync();
+      Alert.alert('Update ready', 'Restarting to apply the latest version…', [
+        { text: 'OK', onPress: () => void Updates.reloadAsync() },
+      ]);
+    } catch (e) {
+      Alert.alert('Update check failed', e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <Screen title="Tracking check" onBack={onBack}>
       <ScrollView contentContainerStyle={{ gap: spacing(1.5), paddingBottom: spacing(3) }}>
@@ -164,6 +185,13 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
             variant="subtle"
           />
         </Card>
+
+        <Button
+          title="Check for app updates"
+          icon="download-outline"
+          onPress={checkForUpdate}
+          variant="ghost"
+        />
 
         <Text style={styles.footNote}>
           Auto-refreshes every 5s. To confirm background tracking: clock in, lock the phone, walk a
