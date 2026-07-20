@@ -516,6 +516,82 @@ test('claim_invite_with_code: anonymous join with phone + code, wrong codes coun
   }
 });
 
+// ── billing / trial / gating (0011) ──────────────────────────────────────────
+
+test('create_company_and_join: self-serve manager signup starts a trial', async () => {
+  const uid = randomUUID();
+  await pool.query(`insert into auth.users (id, phone, email) values ($1, null, 'boss@newco.ie')`, [uid]);
+
+  const profile = await asUser(uid, async (c) => {
+    const { rows } = await c.query(`select * from create_company_and_join('New Co Ltd', 'The Boss')`);
+    return rows[0];
+  });
+  assert.equal(profile.role, 'manager');
+  assert.equal(profile.full_name, 'The Boss');
+
+  const { rows: co } = await pool.query(
+    `select subscription_status, trial_ends_at > now() trialing from companies where id = $1`,
+    [profile.company_id]);
+  assert.equal(co[0].subscription_status, 'trialing');
+  assert.equal(co[0].trialing, true);
+
+  // the new manager sees their own company billing state
+  const { rows: mine } = await asUser(uid, (c) => c.query(`select * from v_my_company`));
+  assert.equal(mine[0].is_active, true);
+  assert.equal(mine[0].name, 'New Co Ltd');
+
+  // idempotent
+  const again = await asUser(uid, async (c) => {
+    const { rows } = await c.query(`select * from create_company_and_join('Other', '')`);
+    return rows[0];
+  });
+  assert.equal(again.id, profile.id);
+});
+
+test('trial gating: lapsed company is read-only until reactivated', async () => {
+  // company A starts active (default trial). Expire it.
+  await pool.query(
+    `update companies set subscription_status = 'trialing', trial_ends_at = now() - interval '1 day' where id = $1`,
+    [IDS.companyA]);
+
+  // worker cannot start a NEW shift
+  await expectError(
+    asUser(IDS.workerA, (c) => c.query(`select clock_in($1, now(), 1, 1, 1, false, '{}')`, [randomUUID()])),
+    'company_inactive');
+
+  // manager cannot invite new workers
+  await expectError(
+    asUser(IDS.managerA, (c) =>
+      c.query(`insert into invites (company_id, phone_e164, role, created_by)
+               values ($1, '+353871119999', 'worker', $2)`, [IDS.companyA, IDS.managerA])),
+    'row-level security');
+
+  // manager can still READ (view history)
+  const { rows: readable } = await asUser(IDS.managerA, (c) => c.query(`select id from shifts`));
+  assert.ok(Array.isArray(readable));
+
+  // reactivate (as if Stripe paid) → clock-in works again
+  await pool.query(`select billing_sync($1, 'cus_x', 'sub_x', 'active', now() + interval '30 days', 3)`, [IDS.companyA]);
+  const shift = await asUser(IDS.workerA, async (c) => {
+    const { rows } = await c.query(`select * from clock_in($1, now(), 53.3, -6.2, 9, false, '{}')`, [randomUUID()]);
+    return rows[0];
+  });
+  assert.equal(shift.status, 'open');
+  await asUser(IDS.workerA, (c) => c.query(`select clock_out($1, now())`, [randomUUID()]));
+
+  // billing_sync recorded the stripe state + seats
+  const { rows: co } = await pool.query(
+    `select subscription_status, stripe_customer_id, seats from companies where id = $1`, [IDS.companyA]);
+  assert.equal(co[0].subscription_status, 'active');
+  assert.equal(co[0].stripe_customer_id, 'cus_x');
+  assert.equal(co[0].seats, 3);
+
+  // clients cannot call billing_sync (service_role only)
+  await expectError(
+    asUser(IDS.managerA, (c) => c.query(`select billing_sync($1,'x','y','active',now(),1)`, [IDS.companyA])),
+    'permission denied');
+});
+
 // ── push notifications (0010) ────────────────────────────────────────────────
 
 test('register_push_token + locate enqueues a push_outbox job', async () => {
