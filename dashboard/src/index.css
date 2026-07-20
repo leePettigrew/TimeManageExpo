@@ -145,6 +145,27 @@ label { display: block; color: var(--dim); font-size: 13px; margin: 8px 0 4px; f
 .auth-mark { width: 36px; height: 36px; }
 .auth-card > .dim { margin: -4px 0 8px; }
 .auth-card button { margin-top: 2px; }
+.google-btn {
+  background: #fff; color: #1f2937; border: none; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.google-btn:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+.or { text-align: center; color: var(--faint); font-size: 12px; margin: 4px 0; }
+.auth-links { display: flex; justify-content: space-between; margin-top: 6px; }
+.auth-links span { color: var(--info); font-size: 13px; cursor: pointer; }
+.auth-links span:hover { text-decoration: underline; }
+.info-msg { color: var(--primary); font-size: 13px; }
+
+/* trial / billing banner */
+.banner {
+  display: flex; align-items: center; gap: 14px; padding: 12px 22px;
+  font-size: 14px; border-bottom: 1px solid var(--border-soft);
+}
+.banner.warn { background: var(--warn-dim); color: var(--warn); }
+.banner.danger { background: var(--danger-dim); color: var(--danger); }
+.banner .spacer { flex: 1; }
+.banner button { padding: 7px 14px; font-size: 13px; }
+.banner button.ghost { color: inherit; border-color: currentColor; }
 
 /* ── cards, stat tiles, tables ─────────────────────────────────────────── */
 .stat-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }

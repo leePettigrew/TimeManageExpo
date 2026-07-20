@@ -1,0 +1,12 @@
+{
+  "name": "timetable-billing",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "dependencies": {
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1",
+    "stripe": "^17.5.0"
+  }
+}

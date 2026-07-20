@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import type { Profile } from '../lib/types';
 import { PING_INTERVALS } from '../lib/types';
+import { useBilling } from '../billing/BillingContext';
+import { syncSeats } from '../billing/billing';
 
 interface Invite {
   id: string;
@@ -18,6 +20,7 @@ interface Invite {
 
 export function Team({ profile }: { profile: Profile }) {
   const qc = useQueryClient();
+  const { readOnly } = useBilling();
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<'worker' | 'manager'>('worker');
@@ -87,7 +90,10 @@ export function Team({ profile }: { profile: Profile }) {
         .eq('id', vars.id);
       if (err) throw err;
     },
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['team'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['team'] });
+      void syncSeats(); // active-worker count changed → update the billed quantity
+    },
   });
 
   const removeInvite = useMutation({
@@ -130,18 +136,24 @@ export function Team({ profile }: { profile: Profile }) {
   return (
     <div className="page">
       <h2>Add someone</h2>
+      {readOnly && (
+        <p className="error">
+          Your trial has ended — subscribe on the Billing tab to add workers again.
+        </p>
+      )}
       <div className="invite-form">
-        <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} disabled={readOnly} />
         <input
           placeholder="087 123 4567"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
+          disabled={readOnly}
         />
-        <select value={role} onChange={(e) => setRole(e.target.value as 'worker' | 'manager')}>
+        <select value={role} onChange={(e) => setRole(e.target.value as 'worker' | 'manager')} disabled={readOnly}>
           <option value="worker">Worker</option>
           <option value="manager">Manager</option>
         </select>
-        <button disabled={addInvite.isPending || !phone.trim()} onClick={() => addInvite.mutate()}>
+        <button disabled={readOnly || addInvite.isPending || !phone.trim()} onClick={() => addInvite.mutate()}>
           Invite
         </button>
       </div>

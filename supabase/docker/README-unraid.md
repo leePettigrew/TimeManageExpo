@@ -332,6 +332,73 @@ Verify end-to-end: worker clocks in on the rebuilt app → manager taps
 iOS push additionally needs the paid Apple Developer account + APNs key (EAS
 prompts for it during `eas build -p ios`). Android is the priority.
 
+## 10c. Manager auth: email/password + Google (optional)
+
+Workers keep phone/invite-code sign-in on the app. **Managers** sign into the
+dashboard with email/password and/or Google. All in `.env`, then
+`docker compose up -d auth`.
+
+**Email/password:** needs SMTP for confirm/reset emails. Recommended: **Resend**
+(resend.com, free 3k/mo). Create an account, add + verify a sending domain,
+create an API key, then set in `.env`:
+```sh
+SMTP_PASS=re_your_api_key
+SMTP_ADMIN_EMAIL=noreply@yourdomain.ie   # a verified Resend sender
+```
+Don't want email yet? Set `MAILER_AUTOCONFIRM=true` — accounts work immediately
+with no SMTP (less secure; fine for early testing).
+
+**Google sign-in:** Google Cloud Console → APIs & Services → **Credentials** →
+Create **OAuth client ID** → Web application. Add the authorised redirect URI
+**exactly**:
+```
+https://timeapi.zovxonline.com/auth/v1/callback
+```
+(your `API_EXTERNAL_URL` + `/callback`). Then in `.env`:
+```sh
+GOOGLE_ENABLED=true
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_SECRET=...
+```
+Also set `SITE_URL=https://dash.zovxonline.com` (the dashboard) so OAuth and
+reset links return to the right place.
+
+New managers self-serve: sign up → "Create your company" → 14-day trial starts.
+
+## 10d. Stripe billing (per-worker plan)
+
+The **billing** container (in the stack) handles Stripe; the dashboard calls it
+with the manager's token, and Stripe calls its `/webhook`. No Stripe secret ever
+touches the browser.
+
+1. **Stripe account** → Developers → **API keys**: copy the **Secret key**
+   (`sk_...` — use test mode first).
+2. **Create the plan:** Products → add a product "TimeTable" → add a **recurring**
+   price, **per unit**, monthly (e.g. €4/worker). Copy the **Price ID**
+   (`price_...`).
+3. **Expose the billing service** via your Cloudflare Tunnel: add a public
+   hostname, e.g. `billing.zovxonline.com` → `http://<unraid-ip>:8787`.
+4. **Webhook:** Stripe → Developers → **Webhooks** → Add endpoint
+   `https://billing.zovxonline.com/webhook`, events: `checkout.session.completed`,
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`. Copy the **Signing secret** (`whsec_...`).
+5. `.env`:
+   ```sh
+   STRIPE_SECRET_KEY=sk_...
+   STRIPE_PRICE_ID=price_...
+   STRIPE_WEBHOOK_SECRET=whsec_...
+   ```
+6. Dashboard `.env`: `VITE_BILLING_URL=https://billing.zovxonline.com` (then
+   rebuild/redeploy the dashboard).
+7. `docker compose up -d billing` and check `docker compose logs billing`
+   (→ "billing service listening on 8787").
+
+Flow: a manager on a lapsed trial hits **Subscribe** → Stripe Checkout → pays →
+the webhook flips the company to `active`. Deactivating/adding workers updates
+the billed seat count automatically. Managers manage/cancel via **Manage
+billing** (Stripe portal). While the app runs in Stripe **test mode**, use
+Stripe's test card `4242 4242 4242 4242`.
+
 ## 11. Day-2 operations
 
 * **Logs:** `docker compose logs -f auth` (or any service name).
